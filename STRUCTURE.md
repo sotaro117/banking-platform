@@ -10,7 +10,7 @@
 ## 1. High-Level Concept
 
 A single company (the "tenant") uses this platform to manage internal wallets
-(employees, vendors, departments, the company's own operating wallet) and
+(employees, vendors, the company's own operating wallet) and
 distribute payments out to external rails via a **Banking-as-a-Service**
 provider, all coordinated through a central, auditable, event-driven ledger.
 
@@ -19,6 +19,16 @@ this is a deliberate learning choice, so the design leans into problems
 (distributed transactions, sagas, service discovery) a monolith would avoid.
 
 _saga_: a design method used to manage data consistency and a sequence of independent steps across distributed microservices during multi-step financial transactions
+
+Assets and Expenses:
+
+- Debit: Increases the balance.
+- Credit: Decreases the balance.
+
+Liabilities, Equity, and Revenue:
+
+- Debit: Decreases the balance.
+- Credit: Increases the balance.
 
 ## 2. Architecture
 
@@ -75,49 +85,144 @@ This is what makes it a real microservice split instead of a distributed
 monolith — and it's why the saga pattern below exists (you lose cross-service
 ACID transactions once DBs are separate).
 
-## 4. Chart of Accounts (Wallet Types)
+## 4. Chart of Accounts
 
-Standard double-entry accounting has five account categories. `wallets.account_type`
-reflects this rather than just "who owns it":
+Standard double-entry accounting has five account categories. All of them
+are structurally the same kind of row — an account that `ledger_entries`
+post debits/credits against — which is why they live in **one table**
+(`ledger_accounts`, §5), not split across separate tables. Splitting them
+would break the "a transaction's entries must net to zero" invariant,
+since a single transaction often needs to post to more than one category
+at once (see the income example below).
 
-| account_type | Represents                                 | Example                                         |
-| ------------ | ------------------------------------------ | ----------------------------------------------- |
-| `ASSET`      | Money the company actually holds           | Company operating wallet                        |
-| `LIABILITY`  | Money owed but not yet paid out            | Employee wallet before payout (accrued, unpaid) |
-| `REVENUE`    | Income recognized, not a spendable balance | "Service Revenue" account                       |
-| `EXPENSE`    | Money spent, categorized                   | "Payroll Expense", "Vendor Payments"            |
+| account_type | Represents                                                | party_id                                                                 | Example                                          |
+| ------------ | --------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
+| `ASSET`      | Money the company actually holds                          | `COMPANY` party (or an employee/vendor if they hold a spendable balance) | Company operating account                        |
+| `LIABILITY`  | Money owed but not yet paid out                           | The employee/vendor party it's owed to                                   | Employee account before payout (accrued, unpaid) |
+| `REVENUE`    | Income recognized — a running tally, not spendable        | `COMPANY` party                                                          | "Service Revenue"                                |
+| `EXPENSE`    | Money spent, categorized — a running tally, not spendable | `COMPANY` party                                                          | "Payroll Expense", "Vendor Payments"             |
+
+**"Wallet" is a product-facing term, not a fourth account type.** It refers
+to `ASSET`/`LIABILITY` rows that represent an actual, meaningful balance
+someone could receive or owe — as opposed to `REVENUE`/`EXPENSE` rows,
+which are **ledger accounts** in the pure bookkeeping sense: categories
+explaining _why_ an asset/liability changed, not something with a
+spendable balance of its own.
+
+**Every account, including `REVENUE`/`EXPENSE`, has a `party_id` — they
+belong to the `COMPANY` party, same as any other company-owned account.**
+`party_id` is never null in practice; it's kept nullable in the schema
+only as headroom for a genuine edge case, not as the mechanism that
+distinguishes "wallet" from "category." That distinction is enforced
+by `account_type` instead: **only `ASSET`/`LIABILITY` accounts can be
+referenced by a `payment_request`** (§5, §11) — money can never be
+routed to or from a `REVENUE`/`EXPENSE` account, because they aren't
+places money lives, they're labels for why a real account's balance moved.
+This is validated in the Payment Orchestrator, not implied by nullability.
 
 **Example: company receives customer income**
-`transaction` with two `ledger_entries`: **DEBIT** company operating wallet (asset ↑),
-**CREDIT** `REVENUE` account (income recognized). The two net to zero.
+`transaction` with two `ledger_entries`: **DEBIT** company operating account
+(asset ↑, a real wallet), **CREDIT** `REVENUE` account — both belong to the
+`COMPANY` party, but only one of them is a "wallet" in the product sense.
+The two net to zero.
 
-**Example: payroll obligation, before it's actually sent**
-**DEBIT** company operating wallet, **CREDIT** employee wallet (a liability — "we owe this").
-A _separate_ transaction later, once the Stripe payout settles, moves it out.
+**Example: payroll/vendor obligation, before it's actually sent**
+**DEBIT** company operating account, **CREDIT** employee or vendor account
+(a liability — "we owe this," still a wallet since it's party-linked). A
+_separate_ transaction later, once the Stripe payout settles, moves it out.
+Employee and vendor accounts are both simply `LIABILITY` — the same
+mechanics apply to either, `party.type` is only used to distinguish them
+for identification/reporting, not for how the ledger treats them.
 
-Separate wallets per entity (not one shared company pool) is necessary, not
-optional — it's the only way to get correct per-party balances, track
+### Transaction Types → Account Pairing
+
+Every `transactions.type` has an unambiguous DEBIT/CREDIT pairing —
+this table is the reference for what a given type is allowed to touch.
+
+| Type                         | Triggered by                         | DEBIT                               | CREDIT                              |
+| ---------------------------- | ------------------------------------ | ----------------------------------- | ----------------------------------- |
+| `PAYROLL` (accrual)          | Company payroll run                  | `EXPENSE` — Payroll Expense         | `LIABILITY` — employee's account    |
+| `PAYROLL` (settlement)       | Stripe confirms payout               | `LIABILITY` — employee's account    | `ASSET` — company operating account |
+| `VENDOR_PAYOUT` (accrual)    | Invoice approved                     | `EXPENSE` — Vendor Payments         | `LIABILITY` — vendor's account      |
+| `VENDOR_PAYOUT` (settlement) | Stripe confirms payout               | `LIABILITY` — vendor's account      | `ASSET` — company operating account |
+| `INTERNAL_TRANSFER`          | Company, between its own accounts    | `ASSET` — destination account       | `ASSET` — source account            |
+| `INCOME`                     | Stripe `ReceivedCredit` webhook (§9) | `ASSET` — company operating account | `REVENUE` — Service Revenue         |
+| `REVERSAL`                   | Saga compensating action (§6)        | mirrors whatever it's undoing       | mirrors whatever it's undoing       |
+
+**`INTERNAL_TRANSFER`** — the one type where both sides are `ASSET`, no
+`LIABILITY`/`REVENUE` involved: moving the company's own money between
+its own accounts (e.g. between a EUR and a USD operating account, or into
+an earmarked "payroll reserve" sub-account before a run). Still goes
+through a real transaction rather than an implicit balance edit, because
+every balance change — even ones with no external counterparty — must
+stay derivable from `ledger_entries`, with no exceptions.
+
+**`REVERSAL`** — undoes a transaction that already posted, used when a
+settlement fails after the ledger already recorded the accrual (§6 step
+6b). Ledger entries are immutable (no updates, no deletes), so a failed
+payout is never deleted — a new transaction posts with the DEBIT/CREDIT
+sides flipped relative to the original, bringing the balance back to
+where it was while preserving a full, honest record of the attempt and
+its correction. This is what keeps the audit trail truthful: "it went to
+€0" is a materially weaker statement than "it went up, then was
+correctly reversed, and here's exactly when."
+
+**Deferred, not built — `DEPOSIT`/`WITHDRAWAL`:** these would represent
+a party holding and moving their _own_ balance directly (deposit: their
+external funds arriving into custody, credit to their `LIABILITY`;
+withdrawal: the reverse) — the mechanism the "employee spends from their
+internal account like a personal bank account" idea (§1) would need.
+Out of scope for v1, which only ever pushes money _out_ to an employee's
+external account via `PAYROLL` settlement — nothing sits in internal
+custody waiting to be withdrawn. Noted here so the absence is a deliberate
+scope decision, not an oversight, if that feature ever gets revisited.
+
+Separate accounts per party (not one shared company pool) is necessary,
+not optional — it's the only way to get correct per-party balances, track
 liabilities distinctly from cash, isolate failures, and produce a clean
 audit trail per entity.
 
 ## 5. Database Schema
 
-![alt database scheme](./doc-img/bank-system-portfolio-database.pdf)
+![database scheme](./doc-img/bank-system-portfolio-database.pdf)
 
 ### Ledger Service DB (Postgres)
 
-**`wallets`**
+**`party`**
+
+A thin identity layer — _not_ a system of record for HR/vendor master data.
+Real employee/vendor details (salary, tax ID, address, employment status
+changes) stay owned by an actual HR/vendor system; this table holds just
+enough to route payments and label them meaningfully.
+
+| Column             | Type                                | Notes                                                                |
+| ------------------ | ----------------------------------- | -------------------------------------------------------------------- |
+| id                 | UUID (PK)                           | what `wallet.party_id` references                                    |
+| external_reference | VARCHAR                             | ID in the real HR/vendor system — the actual link out                |
+| type               | ENUM(`EMPLOYEE`,`VENDOR`,`COMPANY`) |                                                                      |
+| display_name       | VARCHAR                             | e.g. "Jane Doe" — for payment records/audit logs, not a full profile |
+| status             | ENUM(`ACTIVE`,`INACTIVE`)           | lets a payroll batch job query "all active employees"                |
+| created_at         | TIMESTAMPTZ                         |                                                                      |
+
+> In production this would be kept in sync via events/a nightly job from
+> the real HR system (new hire → new party + wallet, termination → status
+> flips to `INACTIVE`) — for this project it can be manually seeded or
+> managed via a simple admin endpoint.
+
+**`wallet`**
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID (PK) | |
 | account_type | ENUM(`ASSET`,`LIABILITY`,`REVENUE`,`EXPENSE`) | see §4 |
-| owner_type | ENUM(`COMPANY`,`EMPLOYEE`,`VENDOR`,`DEPARTMENT`,`SYSTEM`) | |
-| owner_reference | VARCHAR | external HR/vendor ID, not an FK — keeps this service bounded |
+| party_id | UUID (FK → parties.id, nullable) | who this wallet belongs to; **null** for system-level category accounts (e.g. a pure `REVENUE`/`EXPENSE` account not tied to one party) |
 | currency | CHAR(3) | ISO 4217 |
 | status | ENUM(`ACTIVE`,`FROZEN`,`CLOSED`) | |
 | created_at | TIMESTAMPTZ | |
 
 > No `balance` column — always `SUM(ledger_entries.amount)` for that wallet.
+> "Pay a specific employee": query `parties WHERE type='EMPLOYEE' AND
+status='ACTIVE'`, follow to their `wallet_id`, then to that wallet's
+> linked `external_accounts` row for the actual payout destination.
 
 **`ledger_entries`**
 | Column | Type | Notes |
@@ -134,7 +239,7 @@ audit trail per entity.
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID (PK) | |
-| type | ENUM(`PAYROLL`,`VENDOR_PAYOUT`,`INTERNAL_TRANSFER`,`DEPOSIT`,`WITHDRAWAL`,`INCOME`) | |
+| type | ENUM(`PAYROLL`,`VENDOR_PAYOUT`,`INTERNAL_TRANSFER`,`INCOME`,`REVERSAL`) | see §4 for account-type pairing per type |
 | status | ENUM(`PENDING`,`POSTED`,`REVERSED`) | |
 | description | TEXT | |
 | created_at | TIMESTAMPTZ | |
@@ -181,6 +286,19 @@ audit trail per entity.
 | request_hash | VARCHAR | detects key reuse with a different payload |
 | response_snapshot | JSONB | cached response, replayed on retry |
 | created_at / expires_at | TIMESTAMPTZ | e.g. 24h TTL |
+
+**`processed_stripe_events`**
+
+Separate from `idempotency_keys` above — that table protects against _your
+own client_ retrying a request; this one protects against _Stripe_
+redelivering the same webhook (Stripe's delivery guarantee is
+at-least-once, so duplicates are expected, not exceptional).
+
+| Column          | Type         | Notes                                                                            |
+| --------------- | ------------ | -------------------------------------------------------------------------------- |
+| stripe_event_id | VARCHAR (PK) | Stripe's own event ID (`evt_...`), unique per delivery attempt of the same event |
+| event_type      | VARCHAR      | e.g. `treasury.received_credit.created`, `treasury.outbound_payment.posted`      |
+| processed_at    | TIMESTAMPTZ  |                                                                                  |
 
 ### Audit Service store (built from Kafka, not written to directly)
 
@@ -274,19 +392,83 @@ orchestration layer on top).
 - Permanently sandbox-mode for this project — going live requires Stripe's
   business-use-case approval, stated explicitly in the README
 
-## 10. API Sketch (via API Gateway)
+### Inbound funds (company income)
+
+Mirrors the outbound saga, but triggered by Stripe rather than initiated
+by Payment Orchestrator — money landing on the company's Financial
+Account (e.g. a customer paying an invoice) is what turns into `REVENUE`.
+
+```
+1. Stripe sandbox: a ReceivedCredit lands on the company Financial Account
+2. Stripe sends webhook: treasury.received_credit.created
+   → POST /webhooks/stripe/treasury on Payment Orchestrator
+3. Verify the Stripe-Signature header (via stripe-java's
+   Webhook.constructEvent) before trusting the payload — unverified
+   webhooks would let anyone forge "income" into the ledger
+4. Check processed_stripe_events for event.id — if already present,
+   ack and return (Stripe redelivers the same event at-least-once)
+5. Look up the internal account: event.financial_account
+   → external_accounts.stripe_financial_account_id
+   → external_accounts.account_reference (the company's ASSET account)
+6. Call Ledger Service's POST /internal/transactions:
+     DEBIT  Company operating account (ASSET)   ↑ increases
+     CREDIT Service Revenue (REVENUE)            income recognized
+7. Record the event in processed_stripe_events, return 200 to Stripe
+```
+
+No saga/compensating-action logic needed here (unlike outbound payments)
+— it's a single atomic booking triggered by a confirmed, already-settled
+external event, not a multi-step attempt that can fail partway through.
+
+## 10. Encryption
+
+Two separate layers, solving different problems — you want both, not one instead of the other.
+
+**Layer 1: Encryption at rest (baseline, whole-database)**
+RDS encrypts the entire storage volume automatically (AES-256 under the hood) —
+essentially a checkbox at provisioning time. Protects against someone
+stealing the physical disk/snapshot. Does **not** protect against a SQL
+injection or a compromised app-layer credential reading the DB normally —
+once the app reads a row, it's already decrypted.
+
+**Layer 2: Field-level encryption (explicit, for genuinely sensitive fields)**
+Applies specifically to `external_accounts.account_ref_encrypted` — the
+actual IBAN/bank account reference or crypto wallet address. Uses
+**envelope encryption**, the standard AWS pattern:
+
+1. Application asks **KMS** for a data key
+2. Application encrypts the field locally using **AES** (the algorithm) with that data key
+3. Both the AES-encrypted value and the KMS-encrypted data key are stored together in Postgres
+4. KMS itself never sees the raw field value — it only ever manages the key
+
+In practice this is implemented via the `aws-encryption-sdk-java` library rather
+than hand-rolling AES calls — it handles key caching, rotation, and the
+encrypt/decrypt envelope format correctly.
+
+**Rule of thumb for what needs Layer 2 vs. just Layer 1:** anything that
+identifies a real external account or could enable fraud if leaked
+(`account_ref_encrypted`, any future card PAN/CVV if you go deeper into
+Issuing) gets explicit field-level encryption. Ledger amounts, wallet IDs,
+and transaction metadata are adequately covered by RDS encryption at rest
+alone — encrypting every column would just add overhead with no real
+security gain, since none of it is individually sensitive outside its
+row context.
+
+## 11. API Sketch (via API Gateway)
 
 **Payment Orchestrator**
 
-- `POST /payments` — `Idempotency-Key` header required
+- `POST /payments` — `Idempotency-Key` header required; rejects the request
+  if the referenced account's `account_type` is `REVENUE`/`EXPENSE`
+  (only `ASSET`/`LIABILITY` accounts can send/receive real payments — see §4)
 - `GET /payments/{id}` — current state + saga history
-- `GET /payments?wallet_id=&status=`
+- `GET /payments?account_id=&status=`
 
 **Ledger Service**
 
-- `POST /wallets`
-- `GET /wallets/{id}/balance`
-- `GET /wallets/{id}/ledger?from=&to=`
+- `POST /accounts`
+- `GET /accounts/{id}/balance`
+- `GET /accounts/{id}/ledger?from=&to=`
 - `POST /internal/transactions` — called only by Payment Orchestrator, not public
 
 **Audit Service**
@@ -295,7 +477,7 @@ orchestration layer on top).
 - _(phase 2 stretch: GraphQL here specifically — flexible nested queries
   for an ops dashboard; REST stays for all writes/payments)_
 
-## 11. Microservice Toolkit (cross-cutting)
+## 12. Microservice Toolkit (cross-cutting)
 
 | Concern                       | Tool                                                                                                   | Notes                                                                                                                                                     |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -306,7 +488,7 @@ orchestration layer on top).
 | Service discovery             | Consul (or Eureka, for learning the classic pattern)                                                   | AWS Cloud Map is the native alternative once deployed to ECS                                                                                              |
 | **Explicitly skipped**        | Spring Cloud Stream, Spring Cloud Config Server, Spring Cloud Contract, saga frameworks (Axon/Camunda) | direct spring-kafka/spring-amqp is more explicit; env vars/Secrets Manager cover config; hand-rolled choreography saga teaches more than a framework here |
 
-## 12. AWS Mapping
+## 13. AWS Mapping
 
 | Concern                      | Service                                          |
 | ---------------------------- | ------------------------------------------------ |

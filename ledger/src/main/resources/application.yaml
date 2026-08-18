@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: ledger
+  datasource:
+    url: jdbc:postgresql://localhost:63175/banking_db
+    username: localuser
+    password: secret
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
