@@ -514,7 +514,7 @@ change, just a different trigger.
 
 - `POST /wallet`
 - `GET /wallet/{id}/balance`
-- `GET /wallet/{id}/ledger?from=&to=`
+- `GET /wallet/{id}/entry?from=&to=`
 - `POST /internal/transactions` — called only by Payment Orchestrator, not public
 
 **Audit Service**
