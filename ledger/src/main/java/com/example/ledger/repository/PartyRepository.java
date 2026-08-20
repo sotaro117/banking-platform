@@ -9,7 +9,5 @@ import java.util.UUID;
 public interface PartyRepository extends JpaRepository<Party, UUID> {
     Party findByDisplayName(String displayName);
 
-    Party findByPartyType(PartyType partyType);
-
     Party findByExternalReference(String externalReference);
 }

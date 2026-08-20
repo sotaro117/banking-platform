@@ -7,31 +7,38 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.Temporal;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
 @Entity
 @Table(name = "transaction")
 public class Transaction {
+    @Getter
     @Id
 //    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private UUID id;
 
+    @Getter
+    @Setter
     private TransactionType type;
 
+    @Getter
     @OneToMany(mappedBy = "transaction")
     private List<LedgerEntry> entries = new ArrayList<>();
 
+    @Getter
+    @Setter
     private TransactionStatus status;
 
+    @Getter
+    @Setter
     private String description;
 
+    @Getter
     @CreationTimestamp
     @Column(name = "created_at")
     private Instant createdAt;
@@ -81,43 +88,5 @@ public class Transaction {
 
 
     protected Transaction() {
-    }
-
-    // getters & setters
-
-    public UUID getId() {
-        return id;
-    }
-
-    public TransactionType getType() {
-        return type;
-    }
-
-    public void setType(TransactionType type) {
-        this.type = type;
-    }
-
-    public TransactionStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(TransactionStatus status) {
-        this.status = status;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public List<LedgerEntry> getEntries() {
-        return entries;
     }
 }

@@ -17,7 +17,7 @@ class WalletTest {
         Party party = new Party(UUID.randomUUID(), "external-reference", PartyType.COMPANY, "company", PartyStatus.ACTIVE);
         Wallet wallet = Wallet.linkAsset(UUID.randomUUID(), party, "EUR");
 
-        assertThat(wallet.getPartyId()).isEqualTo(party);
+        assertThat(wallet.getParty()).isEqualTo(party);
     }
 
     @Test
@@ -35,5 +35,14 @@ class WalletTest {
         assertThatThrownBy(() -> Wallet.linkAsset(UUID.randomUUID(), party, ""))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("currency must be set");
+    }
+
+    @Test
+    void onlyCompanyPartyShouldHaveRevenueAndExpenseAndAssetWallet() {
+        Party party = new Party(UUID.randomUUID(),"external-reference", PartyType.EMPLOYEE, "Jane Doe", PartyStatus.ACTIVE);
+
+        assertThatThrownBy(() -> Wallet.linkExpense(UUID.randomUUID(), party, "EUR"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Not eligible for " + party.getPartyType().name() + " account");
     }
 }

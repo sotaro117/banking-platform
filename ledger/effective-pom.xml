@@ -1,0 +1,17 @@
+[INFO] Scanning for projects...
+Downloading from central: https://repo.maven.apache.org/maven2/org/testcontainers/testcontainers-bom/1.19.8/testcontainers-bom-1.19.8.pom
+Progress (1): 1.2 kBProgress (1): 8.9 kBProgress (1): 10 kB                    Downloaded from central: https://repo.maven.apache.org/maven2/org/testcontainers/testcontainers-bom/1.19.8/testcontainers-bom-1.19.8.pom (10 kB at 33 kB/s)
+[ERROR] [ERROR] Some problems were encountered while processing the POMs:
+[WARNING] 'dependencies.dependency.scope' for org.projectlombok:lombok:jar must be one of [provided, compile, runtime, test, system] but is 'annotationProcessor'. @ line 73, column 20
+[ERROR] 'dependencies.dependency.version' for org.testcontainers:testcontainers-junit-jupiter:jar is missing. @ line 75, column 21
+ @ 
+[ERROR] The build could not read 1 project -> [Help 1]
+[ERROR]   
+[ERROR]   The project com.example:ledger:0.0.1-SNAPSHOT (/Users/sotaro/Projects/dev-apps/banking-platform/ledger/pom.xml) has 1 error
+[ERROR]     'dependencies.dependency.version' for org.testcontainers:testcontainers-junit-jupiter:jar is missing. @ line 75, column 21
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException

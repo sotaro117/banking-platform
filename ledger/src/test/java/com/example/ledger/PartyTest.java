@@ -45,18 +45,6 @@ class PartyTest {
         assertThat(createdParty.getStatus()).isEqualTo(PartyStatus.ACTIVE);
     }
 
-//    @Test
-//    void newPartyStartsActive() throws IllegalArgumentException {
-//        Party party = new Party(externalAccount, PartyType.EMPLOYEE, displayName, null);
-//
-//        assertThatThrownBy(() -> partySerivce.saveParty(party))
-//                .isInstanceOf(IllegalArgumentException.class);
-//
-//        then(partyRepository)
-//                .should(never())
-//                .save(party);
-//    }
-
     @Test
     void displayNameCannotBeBlank() {
         Party party = new Party(UUID.fromString(id), externalAccount, PartyType.EMPLOYEE, "", PartyStatus.ACTIVE);

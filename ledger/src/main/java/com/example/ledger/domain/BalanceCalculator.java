@@ -33,7 +33,7 @@ public class BalanceCalculator {
 
     public static BigDecimal computeForWallet(Wallet wallet, AccountType type, List<LedgerEntry> entries) {
         List<LedgerEntry> entriesForWallet = entries.stream()
-                .filter(e -> e.getWalletId().getId() == wallet.getId())
+                .filter(e -> e.getWallet().getId() == wallet.getId())
                 .toList();
 
         return compute(type, entriesForWallet);

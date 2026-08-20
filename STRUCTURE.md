@@ -454,7 +454,53 @@ alone — encrypting every column would just add overhead with no real
 security gain, since none of it is individually sensitive outside its
 row context.
 
-## 11. API Sketch (via API Gateway)
+## 11. Authentication & Authorization
+
+**Single role: `ADMIN`.** No tiering (no separate "ops" vs. some other
+audience) — everyone who touches this system is company staff acting
+with full authority over it, so one role covers every protected endpoint.
+The value of having a role at all, even just one, is demonstrating the
+system has _some_ real authentication boundary — a payments platform
+being wide open would be a real gap, not just an incomplete feature.
+
+**No dedicated `users`/credentials table — delegated, same pattern as
+Stripe for banking rails.** Rolling your own credential storage (password
+hashing, reset flows, breach liability) is a security-sensitive domain
+that doesn't demonstrate anything about ledgers or sagas — it's exactly
+the kind of concern worth delegating rather than building.
+
+| Environment                   | Identity provider     | How it works                                                                                                                  |
+| ----------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Local / demo                  | Spring Security + JWT | Single hardcoded/properties-based admin credential; login issues a JWT, API Gateway verifies it on every request              |
+| Production (noted, not built) | AWS Cognito           | Cognito is the system of record for identity; Gateway only verifies the JWT signature + role claim, no local user data at all |
+
+**Protected endpoints — all `hasRole('ADMIN')`, enforced via
+`@PreAuthorize`, checked once at the API Gateway:**
+
+| Action                                                   | Endpoint                                                  | Service              |
+| -------------------------------------------------------- | --------------------------------------------------------- | -------------------- |
+| Create a party (auto-creates linked `LIABILITY` account) | `POST /parties`                                           | Ledger Service       |
+| View a party                                             | `GET /parties/{id}`                                       | Ledger Service       |
+| Freeze or close an account                               | `PATCH /accounts/{id}/status`                             | Ledger Service       |
+| View account balance / ledger history                    | `GET /accounts/{id}/balance`, `GET /accounts/{id}/ledger` | Ledger Service       |
+| Move money between the company's own accounts            | `POST /accounts/internal-transfer`                        | Ledger Service       |
+| Trigger a payroll or vendor payout (full saga)           | `POST /payments`                                          | Payment Orchestrator |
+| Check a payment's status                                 | `GET /payments`, `GET /payments/{id}`                     | Payment Orchestrator |
+| View the audit trail                                     | `GET /audit`                                              | Audit Service        |
+
+`POST /internal/transactions` (§5, §6) stays internal-only regardless —
+called by Payment Orchestrator during the saga, never directly by an
+admin.
+
+**Party/account creation is manually triggered, not synced from an HR
+system.** An admin calls `POST /parties`, and the service layer creates
+the `Party` and its linked `LIABILITY` account together in one call. In
+production this would instead sync automatically from a real HR/vendor
+system (new hire → webhook → same creation logic) — `parties.external_reference`
+already exists specifically so that swap wouldn't require a schema
+change, just a different trigger.
+
+## 12. API Sketch (via API Gateway)
 
 **Payment Orchestrator**
 
@@ -466,9 +512,9 @@ row context.
 
 **Ledger Service**
 
-- `POST /accounts`
-- `GET /accounts/{id}/balance`
-- `GET /accounts/{id}/ledger?from=&to=`
+- `POST /wallet`
+- `GET /wallet/{id}/balance`
+- `GET /wallet/{id}/ledger?from=&to=`
 - `POST /internal/transactions` — called only by Payment Orchestrator, not public
 
 **Audit Service**
@@ -477,7 +523,7 @@ row context.
 - _(phase 2 stretch: GraphQL here specifically — flexible nested queries
   for an ops dashboard; REST stays for all writes/payments)_
 
-## 12. Microservice Toolkit (cross-cutting)
+## 13. Microservice Toolkit (cross-cutting)
 
 | Concern                       | Tool                                                                                                   | Notes                                                                                                                                                     |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -488,7 +534,7 @@ row context.
 | Service discovery             | Consul (or Eureka, for learning the classic pattern)                                                   | AWS Cloud Map is the native alternative once deployed to ECS                                                                                              |
 | **Explicitly skipped**        | Spring Cloud Stream, Spring Cloud Config Server, Spring Cloud Contract, saga frameworks (Axon/Camunda) | direct spring-kafka/spring-amqp is more explicit; env vars/Secrets Manager cover config; hand-rolled choreography saga teaches more than a framework here |
 
-## 13. AWS Mapping
+## 14. AWS Mapping
 
 | Concern                      | Service                                          |
 | ---------------------------- | ------------------------------------------------ |
@@ -504,7 +550,7 @@ row context.
 | Receipt PDFs                 | S3                                               |
 | Transaction search (stretch) | OpenSearch                                       |
 
-## 13. Repository / File Structure
+## 15. Repository / File Structure
 
 Monorepo — one Git repo, multiple independently-buildable services inside.
 (Separate repos per service is a team-ownership pattern you don't need solo.)
@@ -575,35 +621,23 @@ generic exceptions. If you want to share a domain class (e.g. `Wallet.java`)
 between services, that's a signal the boundary is wrong — each service
 owns its own domain model, even where models look similar.
 
-## 14. Build Order
+## 16. Build Order
 
 1. **Ledger Service alone** — domain, balance-from-entries logic, REST API,
    own Postgres, unit tests proving entries always net to zero
 2. **Payment Orchestrator**, calling Ledger Service over plain synchronous
    REST (no Kafka, no saga yet — intentionally "wrong" for true
    microservices, but gets two real services talking first)
-3. Introduce **Kafka** + outbox pattern on Ledger Service; rework the flow
+3. Introduce **Kafka** + the pending_events pattern on Ledger Service; rework the flow
    into the **choreography saga** (§6), including the compensating reversal
 4. **Stripe Treasury/Issuing sandbox** integration in the Connector Layer,
    replacing a `NoopAdapter`; wire Stripe webhooks into the saga
 5. **RabbitMQ** notification path
 6. **Audit Service** consuming Kafka
 7. Cross-cutting: **Resilience4j** on the Orchestrator→Ledger call, then
-   **tracing** (Zipkin locally), then **API Gateway**, then **service
-   discovery** (Consul/Eureka)
-8. **AWS deployment** (RDS ×N, MSK, ECS, Cloud Map) + IaC
+   **tracing** (Zipkin locally), then **API Gateway** with Spring Security
+   JWT + the `ADMIN` role (§11), then **service discovery** (Consul/Eureka)
+8. **AWS deployment** (RDS ×N, MSK, ECS, Cloud Map, Cognito replacing the
+   local JWT credential) + IaC
 9. Stretch goals: GraphQL on Audit Service, Spring Batch for payroll runs
    - reconciliation, OpenSearch transaction search
-
-## Roadmap
-
-- [ ] Ledger Service — domain model, balance-from-entries logic, REST API
-- [ ] Payment Orchestrator — synchronous REST call to Ledger (no Kafka yet)
-- [ ] Kafka + `pending_events` outbox pattern; rework into the saga
-- [ ] Stripe Treasury/Issuing sandbox integration + webhooks
-- [ ] RabbitMQ notification path
-- [ ] Audit Service (Kafka consumer, read-only API)
-- [ ] Resilience4j, distributed tracing, API Gateway, service discovery
-- [ ] AWS deployment (RDS, MSK, ECS, Cloud Map) + Terraform/CDK
-- [ ] Stretch: GraphQL on Audit Service, Spring Batch for payroll runs
-      and reconciliation, OpenSearch transaction search

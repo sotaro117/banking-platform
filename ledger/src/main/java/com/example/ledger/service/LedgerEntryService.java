@@ -1,7 +1,6 @@
 package com.example.ledger.service;
 
 import com.example.ledger.domain.LedgerEntry;
-import com.example.ledger.domain.Transaction;
 import com.example.ledger.repository.LedgerEntryRepository;
 import lombok.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;

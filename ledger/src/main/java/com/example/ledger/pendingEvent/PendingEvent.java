@@ -23,8 +23,8 @@ public class PendingEvent {
     @Column(name = "aggregate_id")
     private UUID aggregateId;
 
-    @Column(name = "event_type")
-    private String eventType;
+    @Column(name = "pending_event_type")
+    private String pendingEventType;
 
     @Convert(converter = EventPayloadAttributeConverter.class)
     @Column(name = "event_type")

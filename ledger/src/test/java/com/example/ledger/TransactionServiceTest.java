@@ -65,14 +65,12 @@ class TransactionServiceTest {
         LedgerEntry companyEntry = LedgerEntry.debit(companyWallet, new BigDecimal(50), "EUR");
         LedgerEntry employeeEntry = LedgerEntry.credit(employeeWallet, new BigDecimal(100), "EUR");
 
-        Transaction transaction = Transaction.post(TransactionType.PAYROLL, List.of(companyEntry, employeeEntry), "payroll");
-
-        assertThatThrownBy(() -> transactionService.saveTransaction(transaction) )
+        assertThatThrownBy(() -> Transaction.post(TransactionType.PAYROLL, List.of(companyEntry, employeeEntry), "payroll") )
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Transaction balance must be equal");
 
-        then(transactionRepository)
-                .should(never())
-                .save(transaction);
+//        then(transactionRepository)
+//                .should(never())
+//                .save(transaction);
     }
 }
