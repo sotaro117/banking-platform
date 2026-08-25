@@ -3,6 +3,8 @@ package com.example.ledger.domain;
 import com.example.ledger.domain.enums.AccountType;
 import com.example.ledger.domain.enums.PartyType;
 import com.example.ledger.domain.enums.WalletStatus;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NonNull;

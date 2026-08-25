@@ -1,13 +1,27 @@
 services:
-  database:
+  postgres-ledger:
     image: "postgres:18.4"
-    container_name: postgres
+    container_name: postgres-ledger
     ports:
-      - "5432"
+      - "5432:5432"
     environment:
-      - "POSTGRES_USER=localuser"
-      - "POSTGRES_DB=banking_db"
+      - "POSTGRES_USER=root"
+      - "POSTGRES_DB=ledger_db"
       - "POSTGRES_PASSWORD=secret"
+    volumes:
+      - "ledger_data:/var/lib/postgresql/data"
+
+  postgres-orchestrator:
+    image: "postgres:18.4"
+    container_name: postgres-orchestrator
+    ports:
+      - "5433:5432"
+    environment:
+      - "POSTGRES_USER=root"
+      - "POSTGRES_DB=orchestrator_db"
+      - "POSTGRES_PASSWORD=secret"
+    volumes:
+      - "orchestrator_data:/var/lib/postgresql/data"
 
   redis:
     image: "redis:8.10.0"
@@ -68,6 +82,10 @@ volumes:
   consul_data:
     driver: local
   consul_config:
+    driver: local
+  ledger_data:
+    driver: local
+  orchestrator_data:
     driver: local
 
 networks:

@@ -46,7 +46,6 @@ public class WalletController {
         return null;
     }
 
-    // test
     @GetMapping("/{id}")
     public ResponseEntity<Wallet> getWallet(@PathVariable UUID id) {
         Wallet wallet = walletService.getWalletById(id);

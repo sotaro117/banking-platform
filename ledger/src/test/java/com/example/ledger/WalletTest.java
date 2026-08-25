@@ -6,9 +6,10 @@ import com.example.ledger.domain.enums.PartyStatus;
 import com.example.ledger.domain.enums.PartyType;
 import com.example.ledger.domain.enums.WalletStatus;
 import org.junit.jupiter.api.Test;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.UUID;
-
+import java.io.File;
 import static org.assertj.core.api.Assertions.*;
 
 class WalletTest {
@@ -23,7 +24,7 @@ class WalletTest {
     @Test
     void newAccountStartsInActiveStatus() {
         Party party = new Party(UUID.randomUUID(),"external-reference", PartyType.COMPANY, "company", PartyStatus.ACTIVE);
-        Wallet wallet = Wallet.linkAsset(UUID.randomUUID(), party, "EUR");
+        Wallet wallet = Wallet.linkExpense(UUID.randomUUID(), party, "EUR");
 
         assertThat(wallet.getStatus()).isEqualTo(WalletStatus.ACTIVE);
     }
