@@ -1,10 +1,8 @@
 package com.example.ledger;
 
-import com.example.ledger.domain.LedgerEntry;
-import com.example.ledger.domain.Party;
-import com.example.ledger.domain.Transaction;
-import com.example.ledger.domain.Wallet;
+import com.example.ledger.domain.*;
 import com.example.ledger.domain.enums.*;
+import com.example.ledger.pendingEvent.PendingEvent;
 import com.example.ledger.repository.LedgerEntryRepository;
 import com.example.ledger.repository.PartyRepository;
 import com.example.ledger.repository.TransactionRepository;
@@ -25,6 +23,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -273,14 +272,37 @@ class LedgerApplicationTests {
     // phase 3
     @Test
     void shouldSavePendingEventWhenPostingTransaction() {
-//        Party company = new Party(UUID.randomUUID(), "", PartyType.COMPANY, "company", PartyStatus.ACTIVE);
-//        Party employee = new Party(UUID.randomUUID(), "HR-external-registration", PartyType.EMPLOYEE, "company", PartyStatus.ACTIVE);
-//
-//        Wallet companyWallet = Wallet.linkAsset(UUID.randomUUID(), company, "EUR");
-//        Wallet employeeWallet = Wallet.linkLiability(UUID.randomUUID(), employee, "EUR");
-//
-//        LedgerEntry companyEntry = LedgerEntry.debit(companyWallet, new BigDecimal(100), "EUR");
-//        LedgerEntry employeeEntry = LedgerEntry.credit(employeeWallet, new BigDecimal(100), "EUR");
-//        Transaction.post(TransactionType.PAYROLL, List.of(companyEntry, employeeEntry), "payroll");
+        String request = """
+        {
+            \"id\":\"f8a9c1cd-182d-44c6-944c-61cb2a9c5284\",
+            \"ledgerTransactionId\":null,
+            \"rail\":\"BANK_TRANSFER\",
+            \"creditAccount\":\"26dac3cd-fad5-4a18-9499-d199f1baef2f\",
+            \"externalAccount\":
+                {\"id\":\"4e51138a-4473-4f65-ae54-bda89dfa6be2\",
+                \"walletReference\":\"0955253c-9c6c-4bbb-b4b1-3baa65ff1fbb\",
+                \"rail\":\"BANK_TRANSFER\",
+                \"stripeFinancialAccountId\":\"example-stripe-id\",
+                \"label\":\"company-payout\",
+                \"createdAt\":null
+                },
+            \"requestType\":\"PAYROLL\",
+            \"paymentState\":\"INITIATED\",
+            \"idempotencyKey\":null,
+            \"amount\":100,
+            \"currency\":\"EUR\",
+            \"stripeReference\":null,
+            \"failureReason\":null,
+            \"createdAt\":null
+        }
+        """;
+
+        ResponseEntity<Void> response = restClient.post()
+                .uri("http://localhost:{port}/internal/transaction")
+                .body(request)
+                .retrieve()
+                .toBodilessEntity();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 }

@@ -22,7 +22,6 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
-import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class TransactionServiceTest {
@@ -68,9 +67,5 @@ class TransactionServiceTest {
         assertThatThrownBy(() -> Transaction.post(TransactionType.PAYROLL, List.of(companyEntry, employeeEntry), "payroll") )
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Transaction balance must be equal");
-
-//        then(transactionRepository)
-//                .should(never())
-//                .save(transaction);
     }
 }
