@@ -44,19 +44,16 @@ Liabilities, Equity, and Revenue:
 │ Ledger       │     │ Payment          │    │ Audit          │    │ Notification   │
 │ Service      │     │ Orchestrator     │    │ Service        │    │ Service        │
 │ (own DB)     │     │ (own DB)         │    │ (own store)    │    │ (no DB)        │
+│              │     │                  │    │                │    │                │
+│              │     │ includes, as a   │    │                │    │                │
+│              │     │ package (no      │    │                │    │                │
+│              │     │ network hop):    │    │                │    │                │
+│              │     │  connectors/     │    │                │    │                │
+│              │     │  RailAdapter     │    │                │    │                │
+│              │     │  → SwanAdapter    │──── calls ──► Swan API (GraphQL,/
+│              │     │                  │               Issuing (sandbox)
 └─────┬──────┘     └───────┬────────┘    └───────▲───────┘    └───────▲───────┘
       │                    │                     │                    │
-      │            ┌───────▼────────┐            │                    │
-      │            │ Connector Layer  │            │                    │
-      │            │ RailAdapter      │            │                    │
-      │            │  → StripeAdapter │            │                    │
-      │            └───────┬────────┘            │                    │
-      │                    │                     │                    │
-      │            ┌───────▼────────┐            │                    │
-      │            │ Stripe Treasury/ │            │                    │
-      │            │ Issuing (sandbox)│            │                    │
-      │            └────────────────┘            │                    │
-      │                                            │                    │
       └──────────────► Kafka (MSK) ────────────────┴────────────────────┘
                   topics: ledger.entries, payments.lifecycle, payments.dlq
                           │
@@ -71,14 +68,13 @@ Cross-cutting: Resilience4j (circuit breakers on inter-service calls)
 
 ## 3. Services
 
-| Service                  | Owns                      | Responsibility                                                                                                                     | Talks to                                              |
-| ------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| **API Gateway**          | nothing (stateless)       | Routing, auth, rate limiting at the edge                                                                                           | All services                                          |
-| **Ledger Service**       | own Postgres DB           | Source of truth for wallets + double-entry ledger. Never trusts a caller's stated balance — always derives it from ledger entries. | Its DB, Kafka (publishes `ledger.entries`)            |
-| **Payment Orchestrator** | own Postgres DB           | Owns the payment lifecycle state machine + saga coordination. Enforces idempotency.                                                | Its DB, Ledger Service (REST), Connector Layer, Kafka |
-| **Connector Layer**      | no DB                     | One adapter per rail behind `RailAdapter` interface. Currently: `StripeBankAdapter` (Treasury/Issuing sandbox).                    | Stripe API                                            |
-| **Audit Service**        | own store (Kafka-derived) | Read-only. Rebuilds queryable history by consuming Kafka. Never writes back to other services.                                     | Kafka (consumes), optional OpenSearch                 |
-| **Notification Service** | no DB                     | Sends emails, generates receipt PDFs. Decoupled via RabbitMQ so a slow provider never blocks a payment.                            | RabbitMQ, S3                                          |
+| Service                  | Owns                      | Responsibility                                                                                                                        | Talks to                                       |
+| ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **API Gateway**          | nothing (stateless)       | Routing, auth, rate limiting at the edge                                                                                              | All services                                   |
+| **Ledger Service**       | own Postgres DB           | Source of truth for wallets + double-entry ledger. Never trusts a caller's stated balance — always derives it from ledger entries.    | Its DB, Kafka (publishes `ledger.entries`)     |
+| **Payment Orchestrator** | own Postgres DB           | Owns the payment lifecycle state machine + saga coordination. Enforces idempotency. Includes rail integration internally (see below). | Its DB, Ledger Service (REST), Swan API, Kafka |
+| **Audit Service**        | own store (Kafka-derived) | Read-only. Rebuilds queryable history by consuming Kafka. Never writes back to other services.                                        | Kafka (consumes), optional OpenSearch          |
+| **Notification Service** | no DB                     | Sends emails, generates receipt PDFs. Decoupled via RabbitMQ so a slow provider never blocks a payment.                               | RabbitMQ, S3                                   |
 
 **Database-per-service is intentional.** No service reaches into another's tables.
 This is what makes it a real microservice split instead of a distributed
@@ -260,24 +256,42 @@ status='ACTIVE'`, follow to their `wallet_id`, then to that wallet's
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID (PK) | |
-| ledger_transaction_id | UUID | reference only — no FK across service DBs |
-| rail | ENUM(`BANK_TRANSFER`,`CARD`,`CRYPTO`) | |
+| ledger_transaction_id | UUID | reference only — no FK across service DBs; set once, right after the Ledger Service accrual call (§6 step 2-3), never changed afterward |
+| amount | NUMERIC(20,4) | duplicated from the ledger transaction — needed here because Orchestrator can't reach into Ledger Service's DB to look it up (database-per-service); this is what's actually sent to Swan |
+| currency | CHAR(3) | |
+| rail | ENUM(`BANK_TRANSFER`,`CARD`,`CRYPTO`) | derived from `external_account_id`'s own `rail` at request time — never supplied directly by the caller (see §12) |
 | external_account_id | UUID (FK → external_accounts) | |
 | state | ENUM(`INITIATED`,`PENDING`,`SETTLED`,`FAILED`,`COMPENSATING`,`REVERSED`) | drives saga + state machine |
 | idempotency_key | VARCHAR (UNIQUE) | |
-| stripe_reference | VARCHAR | Stripe Treasury/Issuing object ID once created |
+| swan_reference | VARCHAR | Swan Payment/Transaction ID — NULL until the rail adapter call (§6 step 5) returns; used to match later webhook confirmations back to this row |
 | failure_reason | TEXT (nullable) | |
 | created_at / updated_at | TIMESTAMPTZ | |
 
 **`external_accounts`**
-| Column | Type | Notes |
-|---|---|---|
-| id | UUID (PK) | |
-| wallet_reference | UUID | which internal wallet this is linked to (reference, not FK) |
-| rail | ENUM(`BANK_TRANSFER`,`CARD`,`CRYPTO`) | |
-| stripe_financial_account_id | VARCHAR | Stripe Treasury Financial Account ID |
-| label | VARCHAR | e.g. "Vendor X — main SEPA account" |
-| created_at | TIMESTAMPTZ | |
+
+Two genuinely different row shapes share this table — the company's own
+BaaS-issued account, and an employee/vendor's pre-existing external bank
+account. Only one of `swan_account_id`/`issued_iban` vs.
+`bank_details_encrypted` is populated per row, depending on which:
+
+| Column                 | Type                                  | Notes                                                                                                                                                                                                                    |
+| ---------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| id                     | UUID (PK)                             |                                                                                                                                                                                                                          |
+| account_reference      | UUID                                  | which internal ledger account this is linked to (reference, not FK)                                                                                                                                                      |
+| rail                   | ENUM(`BANK_TRANSFER`,`CARD`,`CRYPTO`) |                                                                                                                                                                                                                          |
+| swan_account_id        | VARCHAR (nullable)                    | **company row only** — the operational ID returned when the Swan Account was opened; used for API calls and webhook matching (§9)                                                                                        |
+| issued_iban            | VARCHAR (nullable)                    | **company row only** — the real IBAN Swan issues along with the Account; informational (e.g. what a customer wires `INCOME` to), not used operationally the way `swan_account_id` is                                     |
+| bank_details_encrypted | BYTEA (nullable)                      | **employee/vendor rows only** — their own pre-existing external IBAN, provided by an admin at setup time (§11), KMS/AES envelope encrypted (§10); the BaaS provider never issues this, it's an admin-entered destination |
+| label                  | VARCHAR                               | e.g. "Vendor X — main SEPA account"                                                                                                                                                                                      |
+| created_at             | TIMESTAMPTZ                           |                                                                                                                                                                                                                          |
+
+> **Why the direction differs between the two:** the company's Financial
+> Account and its IBAN are _issued to_ the company by the BaaS provider
+> when the account is opened — the company doesn't already have one to
+> supply. An employee/vendor's IBAN is the opposite: their own,
+> pre-existing external bank account, entered once by an admin so
+> Payment Orchestrator knows where to send their payout — the BaaS
+> provider never issues or knows about it until a payment references it.
 
 **`idempotency_keys`**
 | Column | Type | Notes |
@@ -287,18 +301,18 @@ status='ACTIVE'`, follow to their `wallet_id`, then to that wallet's
 | response_snapshot | JSONB | cached response, replayed on retry |
 | created_at / expires_at | TIMESTAMPTZ | e.g. 24h TTL |
 
-**`processed_stripe_events`**
+**`processed_swan_events`**
 
 Separate from `idempotency_keys` above — that table protects against _your
-own client_ retrying a request; this one protects against _Stripe_
-redelivering the same webhook (Stripe's delivery guarantee is
+own client_ retrying a request; this one protects against _Swan_
+redelivering the same webhook (Swan's delivery guarantee is
 at-least-once, so duplicates are expected, not exceptional).
 
-| Column          | Type         | Notes                                                                            |
-| --------------- | ------------ | -------------------------------------------------------------------------------- |
-| stripe_event_id | VARCHAR (PK) | Stripe's own event ID (`evt_...`), unique per delivery attempt of the same event |
-| event_type      | VARCHAR      | e.g. `treasury.received_credit.created`, `treasury.outbound_payment.posted`      |
-| processed_at    | TIMESTAMPTZ  |                                                                                  |
+| Column        | Type         | Notes                                                                       |
+| ------------- | ------------ | --------------------------------------------------------------------------- |
+| swan_event_id | VARCHAR (PK) | Swan's own webhook event ID, unique per delivery attempt of the same event  |
+| event_type    | VARCHAR      | e.g. `treasury.received_credit.created`, `treasury.outbound_payment.posted` |
+| processed_at  | TIMESTAMPTZ  |                                                                             |
 
 ### Audit Service store (built from Kafka, not written to directly)
 
@@ -316,23 +330,35 @@ at-least-once, so duplicates are expected, not exceptional).
 ## 6. Saga Pattern — Payment Flow
 
 Since Ledger Service and Payment Orchestrator have separate databases, a
-payment can't be one ACID transaction across both. Instead it's a
-**choreography-based saga**: each step reacts to the previous step's event,
-with a **compensating action** if a later step fails.
+payment can't be one ACID transaction across both. Instead it's an
+**orchestration-based saga**: Payment Orchestrator explicitly drives every
+step — calling out, waiting on the result, and deciding what happens next
+— rather than services reacting independently to each other's events.
+Kafka still gets used (§7), but only to _announce_ what already happened
+to downstream observers (Audit, Notification) — it never drives what the
+saga does next; that's entirely Orchestrator's own, explicit logic.
 
 ```
 1. Payment Orchestrator: validate request, check idempotency key
-2. → REST call to Ledger Service: "post this transaction"
+2. Orchestrator calls Ledger Service directly (REST): "post this
+   transaction" — and waits for the response
 3. Ledger Service: writes transaction + ledger_entries (own DB, real ACID
-   here — this one write IS atomic), writes to outbox, returns success
-4. Outbox poller publishes → Kafka `ledger.entries` (LEDGER_ENTRY_POSTED)
-5. Payment Orchestrator consumes it, moves payment_request → PENDING,
-   calls Connector Layer → Stripe Treasury/Issuing
-6a. SUCCESS: Stripe webhook confirms → payment_request → SETTLED
-    → publish `payments.lifecycle` (SETTLED) → Audit + Notification react
-6b. FAILURE: Stripe rejects/errors → payment_request → COMPENSATING
-    → publish a compensating event → Ledger Service posts a REVERSAL
-    transaction (equal and opposite ledger_entries) → payment_request → REVERSED
+   here — this one write IS atomic), writes to `pending_events`, returns
+   success synchronously back to Orchestrator
+4. (side effect only, not part of the driving sequence) a poller reads
+   `pending_events` and publishes → Kafka `ledger.entries`
+   (LEDGER_ENTRY_POSTED) → Audit Service consumes it for its own record.
+   Orchestrator does not wait for or react to this — it already has its
+   answer directly from step 2-3
+5. Orchestrator, having gotten success back from Ledger Service, itself
+   calls the rail adapter (connectors/ package, in-process) → Swan API
+6a. SUCCESS: Swan webhook confirms → Orchestrator moves payment_request
+    → SETTLED, then publishes `payments.lifecycle` (SETTLED) purely to
+    notify Audit + Notification — they don't drive anything back
+6b. FAILURE: Swan rejects/errors → Orchestrator moves payment_request
+    → COMPENSATING, and itself calls Ledger Service again to post a
+    REVERSAL transaction (equal and opposite ledger_entries) →
+    payment_request → REVERSED
 ```
 
 The compensating reversal (6b) is the actual "hard part" of microservices
@@ -372,48 +398,70 @@ Deliberately **not** Kafka — these are fire-and-forget tasks, not an
 event log other services need to replay. Direct `spring-amqp` usage
 (not Spring Cloud Stream) keeps the exchange/routing-key mechanics explicit.
 
-## 9. BaaS Integration — Stripe Treasury / Issuing (sandbox)
+## 9. BaaS Integration — Swan (sandbox)
 
-Real fund movement and card issuing is delegated to Stripe rather than
-built directly — this is the realistic pattern real fintechs use (banking
-license + infra provided by a licensed partner, company builds the
-orchestration layer on top).
+**Switched from Stripe Treasury/Issuing to Swan** — Stripe Treasury is
+US-only; Swan is an EU-native BaaS provider (French e-money license,
+covers Spain/EU), a better fit given where this project is actually
+being built. Real fund movement and card issuing is still delegated
+rather than built directly — same realistic pattern (banking license +
+infra provided by a licensed partner, company builds the orchestration
+layer on top) — just a different provider.
 
-| Your concept              | Stripe equivalent                                                  |
-| ------------------------- | ------------------------------------------------------------------ |
-| Wallet                    | Financial Account under a Connect connected account                |
-| External payout           | Treasury outbound payment / ACH transfer                           |
-| Card issuing              | Stripe Issuing — virtual/physical card tied to a Financial Account |
-| Company/entity onboarding | Stripe Connect (KYC handled by Stripe)                             |
+| App concept               | Swan equivalent                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| Ledger account (wallet)   | A Swan `Account` (has its own IBAN + BIC) under your Swan project                                |
+| External payout           | SEPA Credit Transfer / SEPA Instant initiation                                                   |
+| Card issuing              | Swan card issuing — virtual/physical cards, configurable spend controls                          |
+| Company/entity onboarding | Swan's own KYB flow (Swan holds the e-money license, so no separate license needed on your side) |
 
-- `RailAdapter` interface stays as designed; `StripeBankAdapter implements RailAdapter`
-- Official `stripe-java` SDK, called from the Connector Layer only
-- Stripe **webhooks** notify async on settlement/failure → mapped to saga step 6a/6b
-- Permanently sandbox-mode for this project — going live requires Stripe's
-  business-use-case approval, stated explicitly in the README
+- `RailAdapter` interface stays as designed; `SwanAdapter implements RailAdapter`
+- **Swan's API is GraphQL, not REST** — no official Java SDK exists, so
+  the `connectors/` package calls it via a plain HTTP client posting
+  GraphQL queries/mutations (or a generic Java GraphQL client library),
+  rather than a dedicated provider SDK the way a Stripe integration would've used
+- Swan **webhooks** notify async on settlement/failure → mapped to saga
+  step 6a/6b, same as before — Swan's webhook delivery is also
+  **at-least-once**, so the same redelivery-dedup handling applies
+- **Consent/SCA step, worth flagging as a real design difference from
+  Stripe's simpler flow:** Swan's sensitive mutations (initiating a payment) can return
+  a `Consent` requiring approval via a Swan-hosted URL (Strong Customer
+  Authentication) before the operation actually executes — this doesn't
+  apply the same way to pure server-to-server/project-level API access,
+  but it's worth confirming against Swan's docs once you're actually
+  integrating, since it could add a genuinely async approval step to
+  what §6 currently models as one direct call-and-reference-back
+- Sandbox and Live are fully isolated environments in Swan (separate
+  credentials, no crossover) — permanently sandbox-mode for this
+  project; going live requires Swan's own review, stated explicitly in
+  the README, same as a Stripe going-live gate would've been
 
 ### Inbound funds (company income)
 
-Mirrors the outbound saga, but triggered by Stripe rather than initiated
-by Payment Orchestrator — money landing on the company's Financial
-Account (e.g. a customer paying an invoice) is what turns into `REVENUE`.
+Mirrors the outbound saga, but triggered by Swan rather than initiated
+by Payment Orchestrator — money landing on the company's Swan `Account`
+(e.g. a customer paying an invoice via SEPA Credit Transfer) is what
+turns into `REVENUE`.
 
 ```
-1. Stripe sandbox: a ReceivedCredit lands on the company Financial Account
-2. Stripe sends webhook: treasury.received_credit.created
-   → POST /webhooks/stripe/treasury on Payment Orchestrator
-3. Verify the Stripe-Signature header (via stripe-java's
-   Webhook.constructEvent) before trusting the payload — unverified
-   webhooks would let anyone forge "income" into the ledger
-4. Check processed_stripe_events for event.id — if already present,
-   ack and return (Stripe redelivers the same event at-least-once)
-5. Look up the internal account: event.financial_account
-   → external_accounts.stripe_financial_account_id
+1. Swan sandbox: an incoming SEPA Credit Transfer lands on the company's
+   Swan Account (simulated via Swan's sandbox event simulator)
+2. Swan sends webhook: Transaction.Booked
+   → POST /webhooks/swan on Payment Orchestrator
+3. Verify the webhook using the secret configured on the
+   WebhookSubscription (HMAC-style signature check) before trusting the
+   payload — unverified webhooks would let anyone forge "income" into
+   the ledger
+4. Check processed_swan_events for the event's ID — if already present,
+   ack and return (Swan redelivers the same event at-least-once, and
+   does not guarantee delivery order)
+5. Look up the internal account: the webhook payload's accountId
+   → external_accounts.swan_account_id
    → external_accounts.account_reference (the company's ASSET account)
 6. Call Ledger Service's POST /internal/transactions:
      DEBIT  Company operating account (ASSET)   ↑ increases
      CREDIT Service Revenue (REVENUE)            income recognized
-7. Record the event in processed_stripe_events, return 200 to Stripe
+7. Record the event in processed_swan_events, return 200 to Swan
 ```
 
 No saga/compensating-action logic needed here (unlike outbound payments)
@@ -504,9 +552,15 @@ change, just a different trigger.
 
 **Payment Orchestrator**
 
-- `POST /payments` — `Idempotency-Key` header required; rejects the request
-  if the referenced account's `account_type` is `REVENUE`/`EXPENSE`
-  (only `ASSET`/`LIABILITY` accounts can send/receive real payments — see §4)
+- `POST /payments` — `Idempotency-Key` header required; body:
+  `{ accountId, externalAccountId, amount, currency }`. Rejects the
+  request if the referenced account's `account_type` is
+  `REVENUE`/`EXPENSE` (only `ASSET`/`LIABILITY` accounts can send/receive
+  real payments — see §4). **`rail` is not a request field** — it's
+  derived server-side from `externalAccountId`'s own `rail` (§5), since
+  one external account is always tied to exactly one rail; asking the
+  client to also state it would just be redundant data that could
+  contradict what's already on the account
 - `GET /payments/{id}` — current state + saga history
 - `GET /payments?account_id=&status=`
 
@@ -525,14 +579,14 @@ change, just a different trigger.
 
 ## 13. Microservice Toolkit (cross-cutting)
 
-| Concern                       | Tool                                                                                                   | Notes                                                                                                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Edge routing/auth             | Spring Cloud Gateway                                                                                   | single entry point                                                                                                                                        |
-| Inter-service call resilience | Resilience4j                                                                                           | circuit breaker + retry on e.g. Orchestrator → Ledger REST calls                                                                                          |
-| Distributed tracing           | Micrometer Tracing + Zipkin (local) / X-Ray (AWS)                                                      | trace_id threaded through every hop and Kafka event                                                                                                       |
-| Event schema contracts        | Confluent Schema Registry (Avro) or versioned JSON Schema                                              |                                                                                                                                                           |
-| Service discovery             | Consul (or Eureka, for learning the classic pattern)                                                   | AWS Cloud Map is the native alternative once deployed to ECS                                                                                              |
-| **Explicitly skipped**        | Spring Cloud Stream, Spring Cloud Config Server, Spring Cloud Contract, saga frameworks (Axon/Camunda) | direct spring-kafka/spring-amqp is more explicit; env vars/Secrets Manager cover config; hand-rolled choreography saga teaches more than a framework here |
+| Concern                       | Tool                                                                                                   | Notes                                                                                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edge routing/auth             | Spring Cloud Gateway                                                                                   | single entry point                                                                                                                                         |
+| Inter-service call resilience | Resilience4j                                                                                           | circuit breaker + retry on e.g. Orchestrator → Ledger REST calls                                                                                           |
+| Distributed tracing           | Micrometer Tracing + Zipkin (local) / X-Ray (AWS)                                                      | trace_id threaded through every hop and Kafka event                                                                                                        |
+| Event schema contracts        | Confluent Schema Registry (Avro) or versioned JSON Schema                                              |                                                                                                                                                            |
+| Service discovery             | Consul (or Eureka, for learning the classic pattern)                                                   | AWS Cloud Map is the native alternative once deployed to ECS                                                                                               |
+| **Explicitly skipped**        | Spring Cloud Stream, Spring Cloud Config Server, Spring Cloud Contract, saga frameworks (Axon/Camunda) | direct spring-kafka/spring-amqp is more explicit; env vars/Secrets Manager cover config; hand-rolled orchestration saga teaches more than a framework here |
 
 ## 14. AWS Mapping
 
@@ -573,15 +627,11 @@ banking-platform/
 │   │   ├── domain/          (PaymentRequest, state machine)
 │   │   ├── saga/             (saga steps + compensating actions)
 │   │   ├── client/           (REST client → Ledger Service, w/ Resilience4j)
+│   │   ├── connectors/       (RailAdapter, StripeBankAdapter — in-process,
+│   │   │                      no separate service; called by saga/ directly)
 │   │   ├── kafka/            (producer + consumer)
 │   │   └── controller/
 │   ├── Dockerfile
-│   └── pom.xml
-│
-├── connector-service/
-│   ├── src/main/java/com/yourname/connectors/
-│   │   ├── RailAdapter.java
-│   │   └── StripeBankAdapter.java
 │   └── pom.xml
 │
 ├── audit-service/
@@ -629,9 +679,9 @@ owns its own domain model, even where models look similar.
    REST (no Kafka, no saga yet — intentionally "wrong" for true
    microservices, but gets two real services talking first)
 3. Introduce **Kafka** + the pending_events pattern on Ledger Service; rework the flow
-   into the **choreography saga** (§6), including the compensating reversal
-4. **Stripe Treasury/Issuing sandbox** integration in the Connector Layer,
-   replacing a `NoopAdapter`; wire Stripe webhooks into the saga
+   into the **orchestration saga** (§6), including the compensating reversal
+4. **Swan sandbox** integration in Payment Orchestrator's `connectors/` package,
+   replacing a `NoopAdapter`; wire Swan webhooks into the saga
 5. **RabbitMQ** notification path
 6. **Audit Service** consuming Kafka
 7. Cross-cutting: **Resilience4j** on the Orchestrator→Ledger call, then
