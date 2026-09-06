@@ -21,8 +21,12 @@ public class PaymentRequestController {
 
     @PostMapping
     ResponseEntity<Void> createPaymentRequest(@RequestHeader("Idempotency-Key") String idempotencyKey, @RequestBody PaymentRequest request) {
-        paymentRequestService.createRequest(idempotencyKey, request);
-        return new ResponseEntity<>(HttpStatus.CREATED);
+        PaymentRequest paymentRequest = paymentRequestService.createRequest(idempotencyKey, request);
+
+        paymentRequestService.iniciateRequest(paymentRequest);
+
+        paymentRequestService.processPayment(paymentRequest);
+        return new ResponseEntity<>(HttpStatus.OK);
     }
 
     @GetMapping("/{id}")

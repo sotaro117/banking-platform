@@ -1,4 +1,9 @@
 package com.example.payment.domain.swan.onboarding.retrieve;
 
-public record OnboardingErrors() {
+import java.util.List;
+
+public record OnboardingErrors(
+        String field,
+        List<String> errors
+) {
 }

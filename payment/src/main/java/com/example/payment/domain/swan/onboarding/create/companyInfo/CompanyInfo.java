@@ -13,8 +13,6 @@ public record CompanyInfo(
         MonthlyPaymentVolume monthlyPaymentVolume,
         RegulatoryClassification regulatoryClassification,
         Address address,
-        UnitedStatesTaxInfo unitedStatesTaxInfo,
-        String taxIdentificationNumber,
         RelatedIndividual relatedIndividual
 ) {
 }

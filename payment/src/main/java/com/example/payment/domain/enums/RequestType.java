@@ -2,7 +2,6 @@ package com.example.payment.domain.enums;
 
 import org.springframework.stereotype.Component;
 
-@Component
-class RequestType {
-
+public enum RequestType {
+    PAYROLL, VENDOR_PAYOUT, INTERNAL_TRANSFER
 }

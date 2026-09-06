@@ -1,4 +1,4 @@
-package com.example.payment.domain.swan.onboarding.companyInfo.relatedIndividual;
+package com.example.payment.domain.swan.onboarding.create.companyInfo.relatedIndividual;
 
 import java.util.List;
 

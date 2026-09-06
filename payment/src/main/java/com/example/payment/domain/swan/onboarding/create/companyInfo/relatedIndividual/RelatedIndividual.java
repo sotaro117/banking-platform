@@ -10,6 +10,8 @@ public record RelatedIndividual(
         BirthInfo birthInfo,
         Address address,
         String nationality,
+        UnitedStatesTaxInfo unitedStatesTaxInfo,
+        String taxIdentificationNumber,
         UltimateBeneficialOwner ultimateBeneficialOwner,
         LegalRepresentative legalRepresentative
         ) {

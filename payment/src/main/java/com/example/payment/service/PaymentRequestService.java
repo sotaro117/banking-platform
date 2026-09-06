@@ -1,10 +1,15 @@
 package com.example.payment.service;
 
+import com.example.payment.connector.SwanAdapter;
+import com.example.payment.connector.PaymentInstruction;
+import com.example.payment.connector.PayoutResult;
 import com.example.payment.domain.IdempotencyKey;
 import com.example.payment.domain.PaymentRequest;
+import com.example.payment.domain.enums.PaymentState;
 import com.example.payment.repository.IdempotencyKeyRepository;
 import com.example.payment.repository.PaymentRequestRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -29,14 +34,35 @@ public class PaymentRequestService {
     @Autowired
     private IdempotencyKeyRepository idempotencyKeyRepository;
 
+    private final SwanAdapter swanAdapter;
+
+    public PaymentRequestService(SwanAdapter swanAdapter) {
+        this.swanAdapter = swanAdapter;
+    }
+
+    public void iniciateRequest(PaymentRequest request) {
+        RestClient restClient = RestClient.create();
+
+        restClient.post()
+                .uri("http://localhost:8081/internal/transaction")
+                .body(request)
+                .retrieve()
+                .toBodilessEntity();
+
+        // change state to 'PENDING'
+        request.setPaymentState(PaymentState.PENDING);
+        paymentRequestRepository.save(request);
+    }
+
+//    @Cacheable(value = "request", key = "#request.idempotencyKey")
     public PaymentRequest createRequest(String idempotencyKey, PaymentRequest request) {
         IdempotencyKey existingKey = idempotencyKeyService.isExsitsIdempotencyKey(idempotencyKey);
         if (existingKey != null) {
             return paymentRequestRepository.findByIdempotencyKey(existingKey.getKey());
         }
 
-        // validate wallet data linked as external account
-        validateWallet(getWallet(request.getExternalAccount().getWalletReference()));
+        // validate wallet data linked as external account - company only -
+        validateWallet(getWallet(request.getDebitAccount().getWalletReference()));
 
         try {
             String hashedTexts = request.getId() + request.getIdempotencyKey() + request.getCreatedAt();
@@ -56,6 +82,13 @@ public class PaymentRequestService {
             return paymentRequestRepository.save(request);
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("failed to generate hash value");
+        }
+    }
+
+    public void processPayment(PaymentRequest request) {
+        PayoutResult result = swanAdapter.send(PaymentInstruction.from(request));
+        if (result.getStatus().equalsIgnoreCase("Rejected")) {
+            request.setPaymentState(PaymentState.FAILED);
         }
     }
 

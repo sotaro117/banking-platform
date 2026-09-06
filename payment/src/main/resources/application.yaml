@@ -1,8 +1,30 @@
 spring:
   application:
     name: payment
+  datasource:
+    url: jdbc:postgresql://localhost:5433/orchestrator_db
+    username: root
+    password: secret
   jpa:
     hibernate:
       ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  servlet:
+    multipart:
+      enabled: true
+      location: ${java.io.tmpdir}
+  #  kafka:
+#    bootstrap-servers:
+#      - localhost:9092
+#    consumer:
+#      group-id: payment-service
+  data:
+    redis:
+      port: 6379
+      host: localhost
+  api:
+    key:
 server:
   port: 8082

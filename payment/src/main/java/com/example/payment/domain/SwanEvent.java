@@ -7,9 +7,10 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
 
+// store swan webhook
 @Entity
-@Table(name = "stripe_event")
-public class StripeEvent {
+@Table(name = "swan_event")
+public class SwanEvent {
     @Getter
     @Id
     private String id;
@@ -24,13 +25,13 @@ public class StripeEvent {
     private Instant processedAt;
 
 
-    public StripeEvent(String id, String eventType, Instant processedAt) {
+    public SwanEvent(String id, String eventType, Instant processedAt) {
         this.id = id;
         this.eventType = eventType;
         this.processedAt = processedAt;
     }
 
 
-    protected StripeEvent() {
+    protected SwanEvent() {
     }
 }
