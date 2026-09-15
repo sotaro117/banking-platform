@@ -19,6 +19,7 @@ import com.example.payment.domain.swan.onboarding.create.payload.CreateCompanyOn
 import com.example.payment.domain.swan.onboarding.document.SubmitSupportingDocument;
 import com.example.payment.domain.swan.onboarding.document.SupportingDocumentPurpose;
 import com.example.payment.domain.swan.onboarding.document.SupportingDocumentType;
+import com.example.payment.domain.swan.onboarding.finalize.FinalizeAccountHolderOnboardingResponse;
 import com.example.payment.domain.swan.onboarding.retrieve.AccountHolderOnboardingsResponse;
 import com.example.payment.domain.swan.onboarding.retrieve.OnboardingEdge;
 import com.example.payment.domain.swan.onboarding.retrieve.OnboardingErrors;
@@ -90,10 +91,6 @@ class SwanAdapterTest {
 
         assertThat(response.onboarding().id()).isNotBlank();
         assertThat(response.onboarding().statusInfo().status()).isEqualTo("Valid");
-
-        // set accountId & IBAN to external account
-
-        // create new external account
     }
 
     @Test
@@ -187,5 +184,30 @@ class SwanAdapterTest {
 
         // still missing supporting documents
         assertThat(response.onboarding().statusInfo().status()).isEqualTo("Valid");
+    }
+
+    // already finalized -> test failed
+    @Test
+    void shouldFinalizeCompanyOnboarding() {
+        // retrieve onboarding id
+        AccountHolderOnboardingsResponse onboardingList = swanAdapter.getCompanyOnboarding();
+        OnboardingEdge recentOnboarding = onboardingList.edges().get(0);
+        String onboardingId = recentOnboarding.node().id();
+
+        FinalizeAccountHolderOnboardingResponse response = swanAdapter.finalizeCompanyOnaboarding(onboardingId);
+
+        assertThat(response.onboarding().account().id()).isNotBlank();
+        assertThat(response.onboarding().account().IBAN()).isBlank();
+    }
+
+    // test with existing onboardingId
+    @Test
+    void shouldCreateExternalAccountFromOnboarding() {
+        AccountHolderOnboardingsResponse onboardingList = swanAdapter.getCompanyOnboarding();
+        OnboardingEdge finalizedOnboarding = onboardingList.edges().get(0);
+
+        assertThat(finalizedOnboarding.node().statusInfo().status()).isEqualTo("Finalized");
+        assertThat(finalizedOnboarding.node().account().id()).isNotBlank();
+        assertThat(finalizedOnboarding.node().account().IBAN()).isNotBlank();
     }
 }

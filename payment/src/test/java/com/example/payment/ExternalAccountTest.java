@@ -1,5 +1,6 @@
 package com.example.payment;
 
+import com.example.payment.connector.SwanAdapter;
 import com.example.payment.domain.ExternalAccount;
 import com.example.payment.domain.enums.Rail;
 import com.example.payment.repository.ExternalAccountRepository;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.junit.jupiter.api.Test;
 import static org.mockito.BDDMockito.*;

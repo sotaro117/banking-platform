@@ -56,6 +56,10 @@ public class GraphqlRequest {
                           company {
                             name
                           }
+                          account {
+                            id
+                            IBAN
+                          }
                         }
                       }
                     }
@@ -157,4 +161,37 @@ public class GraphqlRequest {
                   }
                 }
                 """;
+
+    public final static String FINALIZE_ONBOARDING = """
+            mutation FinalizeOnboarding(
+                $onboardingId: String!
+             ){
+              finalizeAccountHolderOnboarding(input: { onboardingId: $onboardingId }) {
+                ... on FinalizeAccountHolderOnboardingSuccessPayload {
+                  __typename
+                  onboarding {
+                    ... on CompanyAccountHolderOnboarding {
+                      id
+                      account {
+                        id
+                        IBAN
+                      }
+                      statusInfo {
+                        status
+                      }
+                    }
+                  }
+                }
+                ... on OnboardingNotFoundRejection {
+                  __typename
+                }
+                ... on OnboardingAlreadyFinalizedRejection {
+                  __typename
+                }
+                ... on OnboardingNotReadyForFinalizationRejection {
+                  __typename
+                }
+              }
+            }
+            """;
 }

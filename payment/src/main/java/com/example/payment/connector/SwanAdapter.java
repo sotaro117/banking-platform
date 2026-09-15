@@ -8,6 +8,7 @@ import com.example.payment.domain.swan.onboarding.document.GenerateSupportDocume
 import com.example.payment.domain.swan.onboarding.document.GenerateSupportDocumentUrlResponseField;
 import com.example.payment.domain.swan.onboarding.document.SubmitSupportingDocument;
 import com.example.payment.domain.swan.onboarding.create.payload.CreateCompanyOnboardingResponse;
+import com.example.payment.domain.swan.onboarding.finalize.FinalizeAccountHolderOnboardingResponse;
 import com.example.payment.domain.swan.onboarding.retrieve.AccountHolderOnboardingsResponse;
 import com.example.payment.domain.swan.onboarding.update.UpdateCompanyOnboardingResponse;
 import org.springframework.core.io.ClassPathResource;
@@ -35,13 +36,21 @@ import java.util.Map;
 
 @Component
 public class SwanAdapter implements RailAdapter{
+    // project level access
     private final RestClient restClient = RestClient.builder()
             .baseUrl("https://api.swan.io/sandbox-partner/graphql")
-//            .defaultHeader("x-swan-user-id", "d47a3543-ba21-4773-904b-b263739f5113")
-            .defaultHeader("Authorization", "Bearer GkZx5hCpcwS-4B0SJQMZTgPvVXKWyrRQlDCNfHSpag4.ARlWV-A5LkciX0x3vdA_5jo_1-Xt9K4JvQWeEFonAn4")
+            .defaultHeader("Authorization", "Bearer bCgid4GHZNvNWoH3yUi1NAIVLwlEOXu-Qm9yy0SygbI.eVI150FmeDJrfnu_TZaOE7uCNk5xAJZ1v8LjLKnX2uo")
+            .build();
+
+    // user level access
+    private final RestClient restClientUserAccess = RestClient.builder()
+            .baseUrl("https://api.swan.io/sandbox-partner/graphql")
+            .defaultHeader("Authorization", "Bearer ygHjIUDJS8ljhl2OgO4dWuwi3zVidtu3-FwbVqylMcs.-ogBQRKcroemtauft3QpXAE97kTCAsD4AyFLlPTgS2o")
             .build();
 
     private final HttpSyncGraphQlClient client = HttpSyncGraphQlClient.builder(restClient).build();
+
+    private final HttpSyncGraphQlClient clientUserAccess = HttpSyncGraphQlClient.builder(restClientUserAccess).build();
 
     @Override
     public PayoutResult send(PaymentInstruction instruction) {
@@ -291,6 +300,7 @@ public class SwanAdapter implements RailAdapter{
         Resource file = new ClassPathResource(supportingDocument.filename() + ".pdf");
         body.add("file", file);
 
+        // debug block: retrieve the file size in bytes (from)//
         FormHttpMessageConverter converter = new FormHttpMessageConverter();
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         HttpHeaders headers = new HttpHeaders();
@@ -327,6 +337,7 @@ public class SwanAdapter implements RailAdapter{
             converter.write(body, MediaType.MULTIPART_FORM_DATA, outputMessage);
 
             byte[] requestBody = outputStream.toByteArray();
+            // debug block: retrieve the file size in bytes (to)//
 
             String uri = generatedUrlKeyValues.upload().url();
             ResponseEntity<Void> response = restClientForSupportingDocument.post()
@@ -368,6 +379,21 @@ public class SwanAdapter implements RailAdapter{
                 .variables(variables)
                 .retrieveSync("requestSupportingDocumentCollectionReview")
                 .toEntity(RequestSupportingDocumentCollectionReviewResponse.class);
+
+        return response;
+    }
+
+    @Override
+    public FinalizeAccountHolderOnboardingResponse finalizeCompanyOnaboarding(String onboardingId) {
+        String document = GraphqlRequest.FINALIZE_ONBOARDING;
+
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("onboardingId", onboardingId);
+
+        FinalizeAccountHolderOnboardingResponse response = clientUserAccess.document(document)
+                .variables(variables)
+                .retrieveSync("finalizeAccountHolderOnboarding")
+                .toEntity(FinalizeAccountHolderOnboardingResponse.class);
 
         return response;
     }

@@ -5,6 +5,7 @@ import com.example.payment.domain.swan.onboarding.collection.SupportingDocumentC
 import com.example.payment.domain.swan.onboarding.create.CompanyOnboarding;
 import com.example.payment.domain.swan.onboarding.document.SubmitSupportingDocument;
 import com.example.payment.domain.swan.onboarding.create.payload.CreateCompanyOnboardingResponse;
+import com.example.payment.domain.swan.onboarding.finalize.FinalizeAccountHolderOnboardingResponse;
 import com.example.payment.domain.swan.onboarding.retrieve.AccountHolderOnboardingsResponse;
 import com.example.payment.domain.swan.onboarding.update.UpdateCompanyOnboardingResponse;
 
@@ -12,11 +13,16 @@ import java.util.List;
 import java.util.Map;
 
 public interface RailAdapter {
-    PayoutResult send(PaymentInstruction instruction);
+    // company onboarding
     CreateCompanyOnboardingResponse createCompanyOnboarding(CompanyOnboarding onboarding);
-//    AccountHolderOnboardingsResponse getCompanyOnboarding();
+    AccountHolderOnboardingsResponse getCompanyOnboarding();
     UpdateCompanyOnboardingResponse updateCompanyOnboarding(String onboardingId, CompanyOnboarding onboarding);
     void uploadOnboardingDocument(SubmitSupportingDocument supportingDocument);
     SupportingDocumentCollectionResponse getCollectionId(String onboardingId);
     RequestSupportingDocumentCollectionReviewResponse requestDocumentReview(String collectionId);
+    FinalizeAccountHolderOnboardingResponse finalizeCompanyOnaboarding(String onboardingId);
+    // account
+
+    // SEPA transaction
+    PayoutResult send(PaymentInstruction instruction);
 }
