@@ -6,7 +6,7 @@ public record OnboardingInfo(
         String onboardingUrl,
         OnboardingStatusInfo statusInfo,
         RetrieveAccountAdmin accountAdmin,
-        RetrieveCompanyName name,
+        RetrieveCompanyName company,
         OnboardingAccount account
 ) {
 }

@@ -28,3 +28,6 @@ spring:
     key:
 server:
   port: 8082
+swan:
+  s2s:
+    private-jwk: ${SWAN_S2S_PRIVATE_JWK}

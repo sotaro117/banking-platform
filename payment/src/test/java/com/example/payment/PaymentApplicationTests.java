@@ -1,9 +1,12 @@
 package com.example.payment;
 
+import com.example.payment.connector.SwanAdapter;
 import com.example.payment.domain.ExternalAccount;
 import com.example.payment.domain.PaymentRequest;
 import com.example.payment.domain.enums.Rail;
 import com.example.payment.domain.enums.RequestType;
+import com.example.payment.domain.swan.onboarding.retrieve.AccountHolderOnboardingsResponse;
+import com.example.payment.domain.swan.onboarding.retrieve.OnboardingEdge;
 import com.example.payment.repository.ExternalAccountRepository;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
@@ -30,6 +33,45 @@ class PaymentApplicationTests {
             .build();
     @Autowired
     private ExternalAccountRepository externalAccountRepository;
+    @Autowired
+    private SwanAdapter swanAdapter;
+
+    // create wallet > proceed onboarding > create external account
+    @Test
+    void shouldCreateExternalAccount() {
+        AccountHolderOnboardingsResponse onboardingList = swanAdapter.getCompanyOnboarding();
+        OnboardingEdge onboarding = onboardingList.edges().get(0);
+
+        String holderName = onboarding.node().company().name();
+        String swanAccountId = onboarding.node().account().id();
+        String swanIban = onboarding.node().account().IBAN();
+
+        // before creating external account the app is supposed to require wallet creation and finalized onboarding
+
+        ExternalAccount externalAccount = ExternalAccount.companyAccount(holderName, UUID.randomUUID(), Rail.BANK_TRANSFER, swanAccountId, swanIban, "company account");
+        ResponseEntity<Void> response = restClient
+                .post()
+                .uri("http://localhost:{port}/external-account/create", port)
+                .body(externalAccount)
+                .retrieve()
+                .toBodilessEntity();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+//        ResponseEntity<ExternalAccount> getResponse = restClient
+//                .get()
+//                .uri("http://localhost:{port}/external-account/", port)
+//                .retrieve()
+//                .toEntity(ExternalAccount.class);
+//
+//        DocumentContext documentContext = JsonPath.parse(getResponse);
+//
+//        String savedSwanAccountId = documentContext.read("$.swanAccountId");
+//        String savedSwanIban = documentContext.read("$.swanIban");
+//
+//        assertThat(savedSwanAccountId).isEqualTo(swanAccountId);
+//        assertThat(savedSwanIban).isEqualTo(swanIban);
+    }
 
     @Test
     void includeIdempotencyKeyInHeader() {

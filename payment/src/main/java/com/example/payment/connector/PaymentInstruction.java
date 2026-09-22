@@ -27,6 +27,6 @@ public class PaymentInstruction {
     }
 
     public static PaymentInstruction from(PaymentRequest request) {
-        return new PaymentInstruction(request.getIdempotencyKey(), request.getDebitAccount().getSwanAccountId(), request.getAmount(), request.getCurrency(), "jane doe", request.getCreditAccount().getIban());
+        return new PaymentInstruction(request.getIdempotencyKey(), request.getDebitAccount().getSwanAccountId(), request.getAmount(), request.getCurrency(), request.getCreditAccount().getHolderName(), request.getCreditAccount().getIban());
     }
 }

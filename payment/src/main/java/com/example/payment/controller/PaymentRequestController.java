@@ -19,20 +19,26 @@ public class PaymentRequestController {
         this.paymentRequestService = paymentRequestService;
     }
 
-    @PostMapping
-    ResponseEntity<Void> createPaymentRequest(@RequestHeader("Idempotency-Key") String idempotencyKey, @RequestBody PaymentRequest request) {
-        PaymentRequest paymentRequest = paymentRequestService.createRequest(idempotencyKey, request);
-
-        paymentRequestService.iniciateRequest(paymentRequest);
-
-        paymentRequestService.processPayment(paymentRequest);
-        return new ResponseEntity<>(HttpStatus.OK);
-    }
+//    @PostMapping
+//    ResponseEntity<Void> createPaymentRequest(@RequestHeader("Idempotency-Key") String idempotencyKey, @RequestBody PaymentRequest request) {
+//        PaymentRequest paymentRequest = paymentRequestService.createRequest(idempotencyKey, request);
+//
+//        paymentRequestService.iniciateRequest(paymentRequest);
+//
+//        paymentRequestService.processPayment(paymentRequest);
+//        return new ResponseEntity<>(HttpStatus.OK);
+//    }
 
     @GetMapping("/{id}")
     ResponseEntity<PaymentRequest> getPaymentRequest(@PathVariable UUID id) {
         PaymentRequest request = paymentRequestService.getRequestById(id);
         if (request == null) { return ResponseEntity.notFound().build(); }
         return ResponseEntity.ok().body(request);
+    }
+
+    @GetMapping("/consent/callback")
+    public ResponseEntity<Void> consentCallback() {
+        // Handle the return from Swan
+        return ResponseEntity.ok().build();
     }
 }

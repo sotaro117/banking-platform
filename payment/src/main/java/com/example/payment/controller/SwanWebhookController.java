@@ -6,11 +6,18 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
+
 @RestController
-@RequestMapping("/webhook")
+@RequestMapping("/webhooks")
 public class SwanWebhookController {
-    @PostMapping
-    public void handlePaymentProcess(@RequestBody String body) {
-        System.out.println("Incoming request: " + body);
+    @PostMapping("/payment")
+    public void handlePaymentProcess(@RequestBody Map<String, Object> payload) {
+        System.out.println("Incoming request: " + payload);
+    }
+
+    @PostMapping("/consent")
+    public void handleCriticalProcess(@RequestBody Map<String, Object> payload) {
+        System.out.println("Incoming request: " + payload);
     }
 }

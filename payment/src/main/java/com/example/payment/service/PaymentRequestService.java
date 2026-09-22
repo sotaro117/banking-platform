@@ -85,12 +85,12 @@ public class PaymentRequestService {
         }
     }
 
-    public void processPayment(PaymentRequest request) {
-        PayoutResult result = swanAdapter.send(PaymentInstruction.from(request));
-        if (result.getStatus().equalsIgnoreCase("Rejected")) {
-            request.setPaymentState(PaymentState.FAILED);
-        }
-    }
+//    public void processPayment(PaymentRequest request) {
+//        PayoutResult result = swanAdapter.send(PaymentInstruction.from(request));
+//        if (result.getStatus().equalsIgnoreCase("Rejected")) {
+//            request.setPaymentState(PaymentState.FAILED);
+//        }
+//    }
 
     public PaymentRequest getRequestById(UUID id) {
         Optional<PaymentRequest> request = paymentRequestRepository.findById(id);

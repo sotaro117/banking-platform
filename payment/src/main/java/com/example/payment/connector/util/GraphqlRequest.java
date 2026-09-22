@@ -194,4 +194,142 @@ public class GraphqlRequest {
               }
             }
             """;
+
+    public final static String ADD_BENEFICIARY = """
+            mutation AddBeneficiary(
+                $input: AddTrustedSepaBeneficiaryInput!
+             ){
+              addTrustedSepaBeneficiary(
+                input: $input
+              ) {
+                ... on AddTrustedSepaBeneficiarySuccessPayload {
+                  __typename
+                  trustedBeneficiary {
+                    id
+                  }
+                }
+              }
+            }
+            """;
+
+    public final static String SEPA_DEFAULT = """
+            mutation SepaDefault(
+                $input: InitiateCreditTransfersInput!
+             ){
+              initiateCreditTransfers(
+                input: $input
+              ) {
+                ... on InitiateCreditTransfersSuccessPayload {
+                  __typename
+                  payment {
+                    createdAt
+                    id
+                    statusInfo {
+                      ... on PaymentConsentPending {
+                        status
+                        __typename
+                        consent {
+                          consentUrl
+                        }
+                      }
+                    }
+                  }
+                }
+                ... on AccountNotFoundRejection {
+                    id
+                    message
+                }
+                ... on BeneficiaryVerificationTokenAlreadyConsumedRejection {
+                    beneficiaryVerificationTokens
+                    message
+                }
+                ... on ForbiddenRejection {
+                    message
+                }
+                ... on InternalErrorRejection {
+                    message
+                }
+                ... on ValidationRejection {
+                    fields {
+                        code
+                        message
+                        path
+                    }
+                    message
+                }
+                ... on IdempotencyConflictRejection {
+                    message
+                }
+              }
+            }
+            """;
+
+    public final static String CONSENT = """
+                query Consent(
+                    $id: ID!
+                 ){
+                    consent(id: $id) {
+                        id
+                        challenge
+                        purpose
+                        status
+                    }
+                }
+                """;
+
+    public final static String GRANT_S2S = """
+                    mutation GrantS2s(
+                        $input: GrantConsentWithServerSignatureInput!
+                     ){
+                      grantConsentWithServerSignature(
+                        input: $input
+                      ) {
+                        ... on GrantConsentWithServerSignatureSuccessPayload {
+                          __typename
+                          consent {
+                            id
+                            status
+                            consentUrl
+                          }
+                        }
+                        ... on ConsentNotFoundRejection {
+                          __typename
+                          consentId
+                          message
+                        }
+                        ... on NotReachableConsentStatusRejection {
+                            message
+                            currentStatus
+                            unreachableStatus
+                        }
+                        ... on ForbiddenRejection {
+                            message
+                        }
+                        ... on ConsentTypeNotSupportedByServerConsentRejection {
+                            message
+                        }
+                        ... on ServerConsentNotAllowedForConsentOperationRejection {
+                            message
+                        }
+                        ... on ProjectNotFoundRejection {
+                            message
+                        }
+                        ... on ServerConsentNotAllowedForProjectRejection {
+                            message
+                        }
+                        ... on ServerConsentProjectSettingsNotFoundRejection {
+                            message
+                        }
+                        ... on ServerConsentProjectCredentialNotFoundRejection {
+                            message
+                        }
+                        ... on ServerConsentProjectCredentialNotFoundRejection {
+                            message
+                        }
+                        ... on ServerConsentCredentialsNotValidOrOutdatedRejection {
+                            message
+                        }
+                      }
+                    }
+                    """;
 }

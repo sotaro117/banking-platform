@@ -40,6 +40,9 @@ public class ExternalAccount {
     private String iban;
 
     @Getter @Setter
+    private String trustedBefeniciaryId;
+
+    @Getter @Setter
     private String label;
 
     @Getter
@@ -49,7 +52,7 @@ public class ExternalAccount {
     protected ExternalAccount() {
     }
 
-    private ExternalAccount(UUID id, String holderName, UUID walletReference, Rail rail, String swanAccountId, String swanIban, String iban, String label, Instant createdAt) {
+    private ExternalAccount(UUID id, String holderName, UUID walletReference, Rail rail, String swanAccountId, String swanIban, String iban, String trustedBefeniciaryId, String label, Instant createdAt) {
         this.id = id;
         this.holderName = holderName;
         this.walletReference = walletReference;
@@ -57,15 +60,16 @@ public class ExternalAccount {
         this.swanAccountId = swanAccountId;
         this.swanIban = swanIban;
         this.iban = iban;
+        this.trustedBefeniciaryId = trustedBefeniciaryId;
         this.label = label;
         this.createdAt = createdAt;
     }
 
     public static ExternalAccount companyAccount(String holderName, UUID walletReference, Rail rail, String swanAccountId, String swanIban, String label) {
-        return new ExternalAccount(UUID.randomUUID(), holderName, walletReference, rail, swanAccountId, swanIban, null, label, Instant.now());
+        return new ExternalAccount(UUID.randomUUID(), holderName, walletReference, rail, swanAccountId, swanIban, null, null, label, Instant.now());
     }
 
     public static ExternalAccount individualAccount(String holderName, UUID walletReference, Rail rail, String iban, String label) {
-        return new ExternalAccount(UUID.randomUUID(), holderName, walletReference, rail, null, null, iban, label, Instant.now());
+        return new ExternalAccount(UUID.randomUUID(), holderName, walletReference, rail, null, null, iban, null, label, Instant.now());
     }
 }

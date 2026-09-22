@@ -8,9 +8,8 @@ import com.example.payment.domain.swan.onboarding.create.payload.CreateCompanyOn
 import com.example.payment.domain.swan.onboarding.finalize.FinalizeAccountHolderOnboardingResponse;
 import com.example.payment.domain.swan.onboarding.retrieve.AccountHolderOnboardingsResponse;
 import com.example.payment.domain.swan.onboarding.update.UpdateCompanyOnboardingResponse;
-
-import java.util.List;
-import java.util.Map;
+import com.example.payment.domain.swan.sepaTransfer.beneficiary.TrustedBefeficiary;
+import com.example.payment.domain.swan.sepaTransfer.transfer.IniciateTransferResponse;
 
 public interface RailAdapter {
     // company onboarding
@@ -21,8 +20,8 @@ public interface RailAdapter {
     SupportingDocumentCollectionResponse getCollectionId(String onboardingId);
     RequestSupportingDocumentCollectionReviewResponse requestDocumentReview(String collectionId);
     FinalizeAccountHolderOnboardingResponse finalizeCompanyOnaboarding(String onboardingId);
-    // account
 
     // SEPA transaction
-    PayoutResult send(PaymentInstruction instruction);
+    TrustedBefeficiary addBeneficiary(String accountId, String iban, String name, String consentRedirectUrl);
+    IniciateTransferResponse send(PaymentInstruction instruction);
 }

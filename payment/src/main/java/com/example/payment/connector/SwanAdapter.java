@@ -1,6 +1,8 @@
 package com.example.payment.connector;
 
 import com.example.payment.connector.util.GraphqlRequest;
+import com.example.payment.domain.swan.consent.grantS2s.GrantS2sResponsePayload;
+import com.example.payment.domain.swan.consent.retrieve.ConsentResponsePayload;
 import com.example.payment.domain.swan.onboarding.collection.RequestSupportingDocumentCollectionReviewResponse;
 import com.example.payment.domain.swan.onboarding.collection.SupportingDocumentCollectionResponse;
 import com.example.payment.domain.swan.onboarding.create.CompanyOnboarding;
@@ -11,27 +13,36 @@ import com.example.payment.domain.swan.onboarding.create.payload.CreateCompanyOn
 import com.example.payment.domain.swan.onboarding.finalize.FinalizeAccountHolderOnboardingResponse;
 import com.example.payment.domain.swan.onboarding.retrieve.AccountHolderOnboardingsResponse;
 import com.example.payment.domain.swan.onboarding.update.UpdateCompanyOnboardingResponse;
+import com.example.payment.domain.swan.sepaTransfer.beneficiary.TrustedBefeficiary;
+import com.example.payment.domain.swan.sepaTransfer.transfer.IniciateTransferResponse;
+import com.nimbusds.jose.*;
+import com.nimbusds.jose.crypto.ECDSASigner;
+import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.util.Base64URL;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.graphql.client.HttpSyncGraphQlClient;
 import org.springframework.http.*;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
-import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.ObjectOutputStream;
 import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
@@ -39,79 +50,154 @@ public class SwanAdapter implements RailAdapter{
     // project level access
     private final RestClient restClient = RestClient.builder()
             .baseUrl("https://api.swan.io/sandbox-partner/graphql")
-            .defaultHeader("Authorization", "Bearer bCgid4GHZNvNWoH3yUi1NAIVLwlEOXu-Qm9yy0SygbI.eVI150FmeDJrfnu_TZaOE7uCNk5xAJZ1v8LjLKnX2uo")
+            .defaultHeader("Authorization", "Bearer project token")
             .build();
 
     // user level access
     private final RestClient restClientUserAccess = RestClient.builder()
             .baseUrl("https://api.swan.io/sandbox-partner/graphql")
-            .defaultHeader("Authorization", "Bearer ygHjIUDJS8ljhl2OgO4dWuwi3zVidtu3-FwbVqylMcs.-ogBQRKcroemtauft3QpXAE97kTCAsD4AyFLlPTgS2o")
+            .defaultHeader("Authorization", "Bearer user access token")
             .build();
 
     private final HttpSyncGraphQlClient client = HttpSyncGraphQlClient.builder(restClient).build();
 
     private final HttpSyncGraphQlClient clientUserAccess = HttpSyncGraphQlClient.builder(restClientUserAccess).build();
 
+    // test key
+    @Value("${swan.s2s.private-jwk")
+    private String privateKey;
+
     @Override
-    public PayoutResult send(PaymentInstruction instruction) {
+    public IniciateTransferResponse send(PaymentInstruction instruction) {
         // prepare body to make api call
-        String document = """
-                mutation SepaDefault {
-                  initiateCreditTransfers(
-                    input: {
-                      idempotencyKey: "$idempotencyKey"
-                      consentRedirectUrl: "$YOUR_REDIRECT_URL"
-                      accountId: "$accountId"
-                      creditTransfers: {
-                        amount: { value: "$amount", currency: "$currency" }
-                        sepaBeneficiary: {
-                          iban: "$iban"
-                          name: "$name"
-                          isMyOwnIban: false
-                          save: false
-                        }
-                        mode: Regular
-                      }
-                    }
-                  ) {
-                    ... on InitiateCreditTransfersSuccessPayload {
-                      __typename
-                      payment {
-                        createdAt
-                        id
-                        statusInfo {
-                          ... on PaymentConsentPending {
-                            __typename
-                            consent {
-                              consentUrl
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-                """;
+        String document = GraphqlRequest.SEPA_DEFAULT;
         Map<String, Object> variables = new HashMap<>();
-        variables.put("idempotencyKey", instruction.getIdempotencyKey());
-        variables.put("YOUR_REDIRECT_URL", "");
-        variables.put("accountId", instruction.getAccountId());
-        variables.put("amount", instruction.getAmount());
-        variables.put("currency", instruction.getCurrency());
-        variables.put("iban", instruction.getIban());
-        variables.put("name", instruction.getName());
+        variables.put("input", Map.of(
+                "idempotencyKey", instruction.getIdempotencyKey(),
+                "consentRedirectUrl", "http://localhost:8082/payment/consent/callback",
+                "accountId", instruction.getAccountId(),
+                "creditTransfers", Map.of(
+                        "amount", Map.of(
+                                "value", instruction.getAmount(),
+                                "currency", instruction.getCurrency()
+                        ),
+                        "sepaBeneficiary", Map.of(
+                                "iban", instruction.getIban(),
+                                "name", instruction.getName(),
+                                "save", false
+                        ),
+                        "mode", "Regular"
+                )
+        ));
 
-        // call api + get response
-//        var payment = client.document(document)
+//        IniciateTransferResponse result = client.document(document)
 //                .variables(variables)
-//                .retrieveSync()
-//                .toEntity();
+//                .retrieveSync("initiateCreditTransfers")
+//                .toEntity(IniciateTransferResponse.class);
 
-        // set PayoutResult
+        IniciateTransferResponse result = clientUserAccess.document(document)
+                .variables(variables)
+                .retrieveSync("initiateCreditTransfers")
+                .toEntity(IniciateTransferResponse.class);
 
-        // mock
-        PayoutResult result = PayoutResult.success("mock-ref");
+        processConsent(result.payment().statusInfo().consent().consentUrl());
+
+        if (result.payment().statusInfo().status().equalsIgnoreCase("Rejected")) {
+            throw new RuntimeException("Payment rejected");
+        }
+
         return result;
+    }
+
+    private void processConsent(String url) {
+        URI uri = URI.create(url);
+        String query = uri.getQuery();
+        String consentId = Arrays.stream(query.split("&"))
+                .map(param -> param.split("=", 2))
+                .filter(param -> param[0].equals("consentId"))
+                .map(param -> param[1])
+                .findFirst()
+                .orElseThrow();
+
+        String reqConsentDocument = GraphqlRequest.CONSENT;
+
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("id", consentId);
+
+        ConsentResponsePayload consent = clientUserAccess.document(reqConsentDocument)
+                .variables(variables)
+                .retrieveSync("consent")
+                .toEntity(ConsentResponsePayload.class);
+
+        try {
+            String testPrivateKey = """
+                    
+                    """;
+            ECKey privateECKey = ECKey.parse(privateKey);
+
+            String signature = signConsentChallenge(consent.challenge(), privateECKey);
+
+            String s2sDocument = GraphqlRequest.GRANT_S2S;
+
+            Map<String, Object> s2sVariables = new HashMap<>();
+            s2sVariables.put("input", Map.of(
+                    "consentId", consentId,
+                    "signature", signature
+            ));
+
+            Map<String, Object> response = clientUserAccess.document(s2sDocument)
+                    .variables(s2sVariables)
+                    .retrieveSync("grantConsentWithServerSignature")
+                    .toEntity(new ParameterizedTypeReference<Map<String, Object>>() {});
+
+            Map<String, Object> consentResData = (Map<String, Object>) response.get("consent");
+
+
+            if (!consentResData.get("status").equals("Accepted")) {
+                throw new RuntimeException("Consent not accepted");
+            }
+        } catch (Exception ex) {
+            System.out.println("consent processing error: " + ex);
+            throw new RuntimeException("Error in processing consent");
+        }
+    }
+
+    private String signConsentChallenge(
+            String challenge,
+            ECKey privateJwk
+    ) throws Exception {
+        Map<String, String> header = new LinkedHashMap<>();
+        header.put("alg", "ES256");
+        header.put("typ", "JWT");
+        Map<String, String> payload = new LinkedHashMap<>();
+        payload.put("challenge", challenge);
+        ObjectMapper objectMapper = new ObjectMapper();
+        String headerJson = objectMapper.writeValueAsString(header);
+        String payloadJson = objectMapper.writeValueAsString(payload);
+        String encodedHeader = Base64URL.encode(
+                headerJson.getBytes(StandardCharsets.UTF_8)
+        ).toString();
+
+        String encodedPayload = Base64URL.encode(
+                payloadJson.getBytes(StandardCharsets.UTF_8)
+        ).toString();
+
+        String message = encodedHeader + "." + encodedPayload;
+
+        JWSHeader jwsHeader = new JWSHeader.Builder(JWSAlgorithm.ES256)
+                .type(JOSEObjectType.JWT)
+                .build();
+
+        ECDSASigner signer = new ECDSASigner(
+                privateJwk.toECPrivateKey()
+        );
+
+        Base64URL signature = signer.sign(
+                jwsHeader,
+                message.getBytes(StandardCharsets.UTF_8)
+        );
+        return message + "." + signature;
+
     }
 
     @Override
@@ -394,6 +480,27 @@ public class SwanAdapter implements RailAdapter{
                 .variables(variables)
                 .retrieveSync("finalizeAccountHolderOnboarding")
                 .toEntity(FinalizeAccountHolderOnboardingResponse.class);
+
+        return response;
+    }
+
+    // SEPA related (VoP -> real account number)
+    @Override
+    public TrustedBefeficiary addBeneficiary(String accountId, String iban, String name, String consentRedirectUrl) {
+        String document = GraphqlRequest.ADD_BENEFICIARY;
+
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("input", Map.of(
+                "accountId", accountId,
+                "iban", iban,
+                "name", name,
+                "consentRedirectUrl", consentRedirectUrl
+        ));
+
+        TrustedBefeficiary response = clientUserAccess.document(document)
+                .variables(variables)
+                .retrieveSync("addTrustedSepaBeneficiary.trustedBeneficiary")
+                .toEntity(TrustedBefeficiary.class);
 
         return response;
     }

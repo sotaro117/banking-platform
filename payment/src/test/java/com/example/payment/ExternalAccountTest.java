@@ -27,17 +27,15 @@ class ExternalAccountTest {
     ExternalAccountService externalAccountService;
 
     @Test
-    void createExternalAccount() {
-        // company account must have swan datas
-        ExternalAccount externalAccount = ExternalAccount.companyAccount("ACME", UUID.randomUUID(), Rail.BANK_TRANSFER, null, null, "admin-account");
+    void mustProvideLedgerWalletIdAndOnboardingReferencesBeforeCreatingExternalAccount() {
+        ExternalAccount externalAccount = ExternalAccount.companyAccount("ACME", null, Rail.BANK_TRANSFER, null, null, "admin-account");
 
-        given(externalAccountRepository.save(externalAccount))
-                .willReturn(externalAccount);
-
-        externalAccountService.saveAccount(externalAccount);
+        assertThatThrownBy(() -> externalAccountService.saveAccount(externalAccount))
+                .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessage("Create ledger wallet and proceed onboarding process before creating account");
 
         then(externalAccountRepository)
-                .should()
+                .should(never())
                 .save(externalAccount);
     }
 }

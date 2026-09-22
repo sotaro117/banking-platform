@@ -1,6 +1,11 @@
 package com.example.payment;
 
+import com.example.payment.connector.PaymentInstruction;
 import com.example.payment.connector.SwanAdapter;
+import com.example.payment.domain.ExternalAccount;
+import com.example.payment.domain.PaymentRequest;
+import com.example.payment.domain.enums.Rail;
+import com.example.payment.domain.enums.RequestType;
 import com.example.payment.domain.swan.onboarding.collection.RequestSupportingDocumentCollectionReviewResponse;
 import com.example.payment.domain.swan.onboarding.collection.SupportingDocumentCollectionResponse;
 import com.example.payment.domain.swan.onboarding.create.Address;
@@ -24,19 +29,26 @@ import com.example.payment.domain.swan.onboarding.retrieve.AccountHolderOnboardi
 import com.example.payment.domain.swan.onboarding.retrieve.OnboardingEdge;
 import com.example.payment.domain.swan.onboarding.retrieve.OnboardingErrors;
 import com.example.payment.domain.swan.onboarding.update.UpdateCompanyOnboardingResponse;
+import com.example.payment.domain.swan.sepaTransfer.beneficiary.TrustedBefeficiary;
+import com.example.payment.domain.swan.sepaTransfer.transfer.IniciateTransferResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.web.server.LocalServerPort;
 
 import static org.assertj.core.api.Assertions.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class SwanAdapterTest {
     @Autowired
     private SwanAdapter swanAdapter;
+    @LocalServerPort
+    private int port;
 
     @Test
     void shouldCreateCompanyOnboarding() {
@@ -209,5 +221,34 @@ class SwanAdapterTest {
         assertThat(finalizedOnboarding.node().statusInfo().status()).isEqualTo("Finalized");
         assertThat(finalizedOnboarding.node().account().id()).isNotBlank();
         assertThat(finalizedOnboarding.node().account().IBAN()).isNotBlank();
+    }
+
+    // SEPA related tests
+    @Test
+    void shouldAddTrustedBeneficiary() {
+        AccountHolderOnboardingsResponse onboardingList = swanAdapter.getCompanyOnboarding();
+        OnboardingEdge onboarding = onboardingList.edges().get(0);
+        ExternalAccount inidividualAccount = ExternalAccount.individualAccount("Michael Scotch", UUID.randomUUID(), Rail.BANK_TRANSFER, "DE23100700007158426292", "Micheal personal");
+
+        String consentRedirectUrl = "http://localhost:" + port + "?consent=" + UUID.randomUUID();
+        TrustedBefeficiary trustedBeneficiary = swanAdapter.addBeneficiary(onboarding.node().account().id(), inidividualAccount.getIban(), inidividualAccount.getHolderName(), consentRedirectUrl);
+
+        assertThat(trustedBeneficiary.id()).isNotBlank();
+    }
+
+    @Test
+    void shouldPaymentSent() {
+        AccountHolderOnboardingsResponse onboardingList = swanAdapter.getCompanyOnboarding();
+        OnboardingEdge onboarding = onboardingList.edges().get(0);
+
+        ExternalAccount debitAccount = ExternalAccount.companyAccount("Acme", UUID.randomUUID(), Rail.BANK_TRANSFER, onboarding.node().account().id(), onboarding.node().account().IBAN(), "acme");
+        ExternalAccount creditAccount = ExternalAccount.individualAccount("Juan Carlos", UUID.randomUUID(), Rail.BANK_TRANSFER, "ES3221386805216550827816", "personal account");
+
+        PaymentRequest request = PaymentRequest.create(UUID.randomUUID(), debitAccount, creditAccount, RequestType.PAYROLL, new BigDecimal(100), "EUR");
+        request.setIdempotencyKey(UUID.randomUUID().toString());
+        PaymentInstruction paymentInstruction = PaymentInstruction.from(request);
+        IniciateTransferResponse result = swanAdapter.send(paymentInstruction);
+
+        assertThat(result.payment().statusInfo().status().equalsIgnoreCase("ConsentPending"));
     }
 }
