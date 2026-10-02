@@ -44,19 +44,20 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.logging.Logger;
 
 @Component
 public class SwanAdapter implements RailAdapter{
     // project level access
     private final RestClient restClient = RestClient.builder()
             .baseUrl("https://api.swan.io/sandbox-partner/graphql")
-            .defaultHeader("Authorization", "Bearer project token")
+            .defaultHeader("Authorization", "Bearer project_token")
             .build();
 
     // user level access
     private final RestClient restClientUserAccess = RestClient.builder()
             .baseUrl("https://api.swan.io/sandbox-partner/graphql")
-            .defaultHeader("Authorization", "Bearer user access token")
+            .defaultHeader("Authorization", "Bearer access_token")
             .build();
 
     private final HttpSyncGraphQlClient client = HttpSyncGraphQlClient.builder(restClient).build();
@@ -131,9 +132,8 @@ public class SwanAdapter implements RailAdapter{
 
         try {
             String testPrivateKey = """
-                    
                     """;
-            ECKey privateECKey = ECKey.parse(privateKey);
+            ECKey privateECKey = ECKey.parse(testPrivateKey);
 
             String signature = signConsentChallenge(consent.challenge(), privateECKey);
 
@@ -149,9 +149,7 @@ public class SwanAdapter implements RailAdapter{
                     .variables(s2sVariables)
                     .retrieveSync("grantConsentWithServerSignature")
                     .toEntity(new ParameterizedTypeReference<Map<String, Object>>() {});
-
             Map<String, Object> consentResData = (Map<String, Object>) response.get("consent");
-
 
             if (!consentResData.get("status").equals("Accepted")) {
                 throw new RuntimeException("Consent not accepted");

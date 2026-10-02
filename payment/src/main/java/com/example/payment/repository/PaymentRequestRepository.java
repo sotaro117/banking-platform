@@ -7,4 +7,6 @@ import java.util.UUID;
 
 public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, UUID> {
     public PaymentRequest findByIdempotencyKey(String key);
+
+    public PaymentRequest findBySwanReference(String swanReference);
 }

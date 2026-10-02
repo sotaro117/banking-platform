@@ -26,7 +26,7 @@ public class Transaction {
     @Setter
     private TransactionType type;
 
-    @Getter
+    @Getter @Setter
     @OneToMany(mappedBy = "transaction")
     private List<LedgerEntry> entries = new ArrayList<>();
 
@@ -48,6 +48,7 @@ public class Transaction {
         validateCurrency(entries);
 
         UUID transactionId = UUID.randomUUID();
+
         Transaction transaction = new Transaction(transactionId, transactionType, TransactionStatus.PENDING, entries, description);
         entries.forEach(e -> e.assignTransaction(transaction));
         return transaction;

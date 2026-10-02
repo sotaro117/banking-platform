@@ -3,13 +3,17 @@ package com.example.payment.service;
 import com.example.payment.connector.SwanAdapter;
 import com.example.payment.connector.PaymentInstruction;
 import com.example.payment.connector.PayoutResult;
+import com.example.payment.domain.ExternalAccount;
 import com.example.payment.domain.IdempotencyKey;
 import com.example.payment.domain.PaymentRequest;
 import com.example.payment.domain.enums.PaymentState;
+import com.example.payment.domain.enums.RequestType;
+import com.example.payment.domain.swan.sepaTransfer.transfer.IniciateTransferResponse;
 import com.example.payment.repository.IdempotencyKeyRepository;
 import com.example.payment.repository.PaymentRequestRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -40,6 +44,8 @@ public class PaymentRequestService {
         this.swanAdapter = swanAdapter;
     }
 
+    public PaymentRequest saveRequest(PaymentRequest request) { return paymentRequestRepository.save(request); };
+
     public void iniciateRequest(PaymentRequest request) {
         RestClient restClient = RestClient.create();
 
@@ -50,7 +56,7 @@ public class PaymentRequestService {
                 .toBodilessEntity();
 
         // change state to 'PENDING'
-        request.setPaymentState(PaymentState.PENDING);
+        request.setPaymentState(PaymentState.INITIATED);
         paymentRequestRepository.save(request);
     }
 
@@ -85,12 +91,22 @@ public class PaymentRequestService {
         }
     }
 
-//    public void processPayment(PaymentRequest request) {
-//        PayoutResult result = swanAdapter.send(PaymentInstruction.from(request));
-//        if (result.getStatus().equalsIgnoreCase("Rejected")) {
-//            request.setPaymentState(PaymentState.FAILED);
-//        }
-//    }
+    public void processPayment(PaymentRequest request) {
+        IniciateTransferResponse result = swanAdapter.send(PaymentInstruction.from(request));
+        request.setSwanReference(result.payment().id());
+        if (result.payment().statusInfo().status().equalsIgnoreCase("Rejected")) {
+            request.setPaymentState(PaymentState.FAILED);
+        } else {
+            request.setPaymentState(PaymentState.PENDING);
+        }
+
+        paymentRequestRepository.save(request);
+    }
+
+    public PaymentRequest getRequestBySwanReference(String swanReference) {
+        PaymentRequest request = paymentRequestRepository.findBySwanReference(swanReference);
+        return request;
+    }
 
     public PaymentRequest getRequestById(UUID id) {
         Optional<PaymentRequest> request = paymentRequestRepository.findById(id);
@@ -128,6 +144,33 @@ public class PaymentRequestService {
         // wallet must be in active status
         if (!status.equalsIgnoreCase("ACTIVE")) {
             throw new IllegalArgumentException("wallet must be ACTIVE to make a payment request");
+        }
+    }
+
+    // reversal
+    public void requestReversal(PaymentRequest request) {
+        // reverse the destination
+        ExternalAccount credit = request.getCreditAccount();
+        ExternalAccount debit = request.getDebitAccount();
+
+        request.setCreditAccount(debit);
+        request.setDebitAccount(credit);
+        request.setRequestType(RequestType.REVERSAL);
+        request.setPaymentState(PaymentState.COMPENSATING);
+
+        RestClient restClient = RestClient.create();
+
+        ResponseEntity<Void> response = restClient.post()
+                .uri("http://localhost:8081/internal/transaction")
+                .body(request)
+                .retrieve()
+                .toBodilessEntity();
+
+        if (response.getStatusCode() == HttpStatus.OK) {
+            request.setPaymentState(PaymentState.REVERSED);
+            paymentRequestRepository.save(request);
+        } else {
+            throw new RuntimeException("failed to process reversal");
         }
     }
 

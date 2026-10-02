@@ -38,6 +38,7 @@ public class Wallet {
     @Setter
     @ManyToOne
     @JoinColumn(name = "party_id", referencedColumnName = "id")
+    @JsonIgnore
     private Party party;
 
     @Getter

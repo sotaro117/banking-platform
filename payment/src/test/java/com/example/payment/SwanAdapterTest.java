@@ -4,6 +4,7 @@ import com.example.payment.connector.PaymentInstruction;
 import com.example.payment.connector.SwanAdapter;
 import com.example.payment.domain.ExternalAccount;
 import com.example.payment.domain.PaymentRequest;
+import com.example.payment.domain.enums.PaymentState;
 import com.example.payment.domain.enums.Rail;
 import com.example.payment.domain.enums.RequestType;
 import com.example.payment.domain.swan.onboarding.collection.RequestSupportingDocumentCollectionReviewResponse;
@@ -31,14 +32,25 @@ import com.example.payment.domain.swan.onboarding.retrieve.OnboardingErrors;
 import com.example.payment.domain.swan.onboarding.update.UpdateCompanyOnboardingResponse;
 import com.example.payment.domain.swan.sepaTransfer.beneficiary.TrustedBefeficiary;
 import com.example.payment.domain.swan.sepaTransfer.transfer.IniciateTransferResponse;
+import com.example.payment.repository.ExternalAccountRepository;
+import com.example.payment.repository.PaymentRequestRepository;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.shaded.org.awaitility.Awaitility;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.hamcrest.Matchers.equalTo;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -49,6 +61,31 @@ class SwanAdapterTest {
     private SwanAdapter swanAdapter;
     @LocalServerPort
     private int port;
+    @Autowired
+    private PaymentRequestRepository paymentRequestRepository;
+    @Autowired
+    private ExternalAccountRepository externalAccountRepository;
+
+    static PostgreSQLContainer postgres = new PostgreSQLContainer(
+            "postgres:16-alpine"
+    );
+
+    @BeforeAll
+    static void beforeAll() {
+        postgres.start();
+    }
+
+    @AfterAll
+    static void afterAll() {
+        postgres.stop();
+    }
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+    }
 
     @Test
     void shouldCreateCompanyOnboarding() {
@@ -108,7 +145,7 @@ class SwanAdapterTest {
     @Test
     void shouldRetrieveRecentOnboardingInfo() {
         AccountHolderOnboardingsResponse onboardingList = swanAdapter.getCompanyOnboarding();
-        OnboardingEdge recentOnboarding = onboardingList.edges().get(0);
+        OnboardingEdge recentOnboarding = onboardingList.edges().get(1);
         assertThat(recentOnboarding.node().id()).isEqualTo("2c517a22-ec5d-49af-87b8-c065ea29fbf6");
     }
 
@@ -237,18 +274,33 @@ class SwanAdapterTest {
     }
 
     @Test
-    void shouldPaymentSent() {
+    void shouldProcessPayment() {
+        // onboarding[0] => individual account
+        // onboarding[1] => company account
         AccountHolderOnboardingsResponse onboardingList = swanAdapter.getCompanyOnboarding();
-        OnboardingEdge onboarding = onboardingList.edges().get(0);
+        OnboardingEdge onboarding = onboardingList.edges().get(1);
 
         ExternalAccount debitAccount = ExternalAccount.companyAccount("Acme", UUID.randomUUID(), Rail.BANK_TRANSFER, onboarding.node().account().id(), onboarding.node().account().IBAN(), "acme");
-        ExternalAccount creditAccount = ExternalAccount.individualAccount("Juan Carlos", UUID.randomUUID(), Rail.BANK_TRANSFER, "ES3221386805216550827816", "personal account");
+        ExternalAccount creditAccount = ExternalAccount.individualAccount("Sotaro Takahata", UUID.randomUUID(), Rail.BANK_TRANSFER, "ES6111112222026279844350", "personal account");
+        externalAccountRepository.saveAll(List.of(debitAccount, creditAccount));
 
-        PaymentRequest request = PaymentRequest.create(UUID.randomUUID(), debitAccount, creditAccount, RequestType.PAYROLL, new BigDecimal(100), "EUR");
-        request.setIdempotencyKey(UUID.randomUUID().toString());
+        PaymentRequest request = PaymentRequest.create(UUID.randomUUID(), debitAccount, creditAccount, RequestType.PAYROLL, new BigDecimal(50), "EUR");
+        String idempotencyKey = UUID.randomUUID().toString();
+        request.setIdempotencyKey(idempotencyKey);
+        paymentRequestRepository.save(request);
         PaymentInstruction paymentInstruction = PaymentInstruction.from(request);
         IniciateTransferResponse result = swanAdapter.send(paymentInstruction);
 
         assertThat(result.payment().statusInfo().status().equalsIgnoreCase("ConsentPending"));
+
+        // wait for webhook
+//        Awaitility.await()
+//                .atLeast(Duration.ofSeconds(10))
+//                .atMost(Duration.ofSeconds(30));
+//
+//        PaymentRequest updatedRequest = paymentRequestRepository.findByIdempotencyKey(idempotencyKey);
+//
+//        // assert payment result
+//        assertThat(updatedRequest.getPaymentState()).isEqualTo(PaymentState.PENDING);
     }
 }

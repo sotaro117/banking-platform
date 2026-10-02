@@ -2,7 +2,7 @@ spring:
   application:
     name: ledger
   datasource:
-    url: jdbc:postgresql://localhost:63175/banking_db
+    url: jdbc:postgresql://localhost:5432/ledger_db
     username: root
     password: secret
   jpa:
@@ -11,5 +11,8 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+#  kafka:
+#    bootstrap-servers:
+#      - localhost:9092
 server:
   port: 8081

@@ -49,6 +49,10 @@ public class WalletController {
     @GetMapping("/{id}")
     public ResponseEntity<Wallet> getWallet(@PathVariable UUID id) {
         Wallet wallet = walletService.getWalletById(id);
+
+        if (wallet == null) {
+            return ResponseEntity.notFound().build();
+        }
         return ResponseEntity.ok().body(wallet);
     }
 }

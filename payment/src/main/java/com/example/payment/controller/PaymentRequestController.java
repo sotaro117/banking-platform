@@ -19,15 +19,15 @@ public class PaymentRequestController {
         this.paymentRequestService = paymentRequestService;
     }
 
-//    @PostMapping
-//    ResponseEntity<Void> createPaymentRequest(@RequestHeader("Idempotency-Key") String idempotencyKey, @RequestBody PaymentRequest request) {
-//        PaymentRequest paymentRequest = paymentRequestService.createRequest(idempotencyKey, request);
-//
-//        paymentRequestService.iniciateRequest(paymentRequest);
-//
-//        paymentRequestService.processPayment(paymentRequest);
-//        return new ResponseEntity<>(HttpStatus.OK);
-//    }
+    @PostMapping
+    ResponseEntity<Void> createPaymentRequest(@RequestHeader("Idempotency-Key") String idempotencyKey, @RequestBody PaymentRequest request) {
+        PaymentRequest paymentRequest = paymentRequestService.createRequest(idempotencyKey, request);
+
+        paymentRequestService.iniciateRequest(paymentRequest);
+
+        paymentRequestService.processPayment(paymentRequest);
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
 
     @GetMapping("/{id}")
     ResponseEntity<PaymentRequest> getPaymentRequest(@PathVariable UUID id) {

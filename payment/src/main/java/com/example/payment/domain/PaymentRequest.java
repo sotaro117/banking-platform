@@ -54,9 +54,9 @@ public class PaymentRequest {
     @Column(length = 3)
     private String currency;
 
-    @Getter
-    @Column(name = "stripe_reference")
-    private String stripeReference;
+    @Getter @Setter
+    @Column(name = "swan_reference")
+    private String swanReference;
 
     @Setter @Getter
     @Column(name = "failure_reason")
@@ -70,7 +70,7 @@ public class PaymentRequest {
     protected PaymentRequest() {
     }
 
-    private PaymentRequest(UUID id, UUID ledgerTransactionId, Rail rail, ExternalAccount creditAccount, ExternalAccount debitAccount, RequestType requestType, PaymentState paymentState, String idempotencyKey, BigDecimal amount, String currency, String stripeReference, String failureReason, Instant createdAt) {
+    private PaymentRequest(UUID id, UUID ledgerTransactionId, Rail rail, ExternalAccount creditAccount, ExternalAccount debitAccount, RequestType requestType, PaymentState paymentState, String idempotencyKey, BigDecimal amount, String currency, String swanReference, String failureReason, Instant createdAt) {
         this.id = id;
         this.ledgerTransactionId = ledgerTransactionId;
         this.rail = rail;
@@ -81,7 +81,7 @@ public class PaymentRequest {
         this.idempotencyKey = idempotencyKey;
         this.amount = amount;
         this.currency = currency;
-        this.stripeReference = stripeReference;
+        this.swanReference = swanReference;
         this.failureReason = failureReason;
         this.createdAt = createdAt;
     }

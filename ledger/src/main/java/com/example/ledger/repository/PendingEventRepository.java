@@ -8,4 +8,6 @@ import java.util.UUID;
 
 public interface PendingEventRepository extends JpaRepository<PendingEvent, UUID> {
     public List<PendingEvent> findByPublishedFalseOrderByCreatedAtAsc();
+
+    public PendingEvent findByAggregateId(UUID aggregateId);
 }

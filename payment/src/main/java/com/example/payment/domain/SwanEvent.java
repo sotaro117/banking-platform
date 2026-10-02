@@ -11,23 +11,27 @@ import java.time.Instant;
 @Entity
 @Table(name = "swan_event")
 public class SwanEvent {
-    @Getter
+    @Getter @Setter
     @Id
     private String id;
 
-    @Getter
+    @Getter @Setter
     @Column(name = "event_type")
     private String eventType;
 
     @Getter @Setter
-    @UpdateTimestamp
+    @Column(name = "resource_id")
+    private String resourceId;
+
+    @Getter @Setter
     @Column(name = "processed_at")
     private Instant processedAt;
 
 
-    public SwanEvent(String id, String eventType, Instant processedAt) {
+    public SwanEvent(String id, String eventType, String resourceId, Instant processedAt) {
         this.id = id;
         this.eventType = eventType;
+        this.resourceId = resourceId;
         this.processedAt = processedAt;
     }
 

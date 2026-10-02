@@ -30,7 +30,7 @@ public class PendingEvent {
     @Column(name = "pending_event_type")
     private String pendingEventType;
 
-    @Column(name = "entry_payload")
+    @Column(columnDefinition = "TEXT", name = "entry_payload")
     private String entryPayload;
 
     private boolean published;
@@ -52,12 +52,12 @@ public class PendingEvent {
     protected PendingEvent() {
     }
 
-    public static PendingEvent eventForTransaction(Transaction transaction, ObjectMapper objectMapper) {
+    public static PendingEvent eventForTransaction(Transaction transaction, String eventType, ObjectMapper objectMapper) {
         LedgerEntryPayload payload = LedgerEntryPayload.from(transaction);
         String payloadJson;
 
         payloadJson = objectMapper.writeValueAsString(payload);
 
-        return new PendingEvent(UUID.randomUUID(), transaction.getId(), "LEGER_ENTRY_POSTED", payloadJson, false, Instant.now());
+        return new PendingEvent(UUID.randomUUID(), transaction.getId(), eventType, payloadJson, false, Instant.now());
     }
 }
